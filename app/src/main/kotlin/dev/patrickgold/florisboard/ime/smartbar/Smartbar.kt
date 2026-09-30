@@ -61,7 +61,8 @@ import dev.patrickgold.florisboard.ime.ImeUiMode
 import dev.patrickgold.florisboard.ime.keyboard.FlorisImeSizing
 import dev.patrickgold.florisboard.ime.keyboard3.LocalImeController
 import dev.patrickgold.florisboard.ime.keyboard3.ImeActions
-import dev.patrickgold.florisboard.ime.nlp.latin.TypingPredictionPolicy
+import dev.patrickgold.florisboard.ime.keyboard.IncognitoMode
+import dev.patrickgold.florisboard.repli.ime.RepliFieldPolicy
 import dev.patrickgold.florisboard.ime.nlp.NlpInlineAutofill
 import dev.patrickgold.florisboard.ime.smartbar.quickaction.QuickAction
 import dev.patrickgold.florisboard.ime.smartbar.quickaction.QuickActionButton
@@ -296,10 +297,15 @@ private fun SmartbarMainRow(modifier: Modifier = Modifier) {
     @Composable
     fun RepliReplyAction() {
         val arrangement by prefs.smartbar.actionArrangement.collectAsState()
+        val incognitoPreference by prefs.suggestion.incognitoMode.collectAsState()
+        val forceIncognito by prefs.suggestion.forceIncognitoModeFromDynamic.collectAsState()
+        val hostNoLearning = imeState.editor.info.imeOptions.flagNoPersonalizedLearning
+        val userIncognito = imeState.flags.isIncognitoMode &&
+            !(hostNoLearning && incognitoPreference == IncognitoMode.DYNAMIC_ON_OFF && !forceIncognito)
         val replyAction = QuickAction.InsertK3Descriptor(ImeActions.SuggestReplies)
         if (imeState.flags.imeUiMode == ImeUiMode.TEXT &&
-            !imeState.flags.isIncognitoMode &&
-            TypingPredictionPolicy.allows(imeState.editor.info) &&
+            !userIncognito &&
+            RepliFieldPolicy.allows(imeState.editor.info) &&
             arrangement.stickyAction != replyAction
         ) {
             QuickActionButton(

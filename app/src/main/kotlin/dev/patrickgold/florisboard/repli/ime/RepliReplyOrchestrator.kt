@@ -13,7 +13,6 @@ import android.view.WindowManager
 import dev.patrickgold.florisboard.BuildConfig
 import dev.patrickgold.florisboard.R
 import dev.patrickgold.florisboard.ime.editor.FlorisEditorInfo
-import dev.patrickgold.florisboard.ime.nlp.latin.TypingPredictionPolicy
 import dev.patrickgold.florisboard.lib.devtools.flogDebug
 import dev.patrickgold.florisboard.lib.devtools.flogError
 import dev.patrickgold.florisboard.repli.account.RepliAccountSessionRepository
@@ -205,7 +204,7 @@ class RepliReplyOrchestrator(
 
     fun onStartInput(info: FlorisEditorInfo): Boolean {
         val incoming = ReplyEditor(info.packageName ?: "", info.base.fieldId, info.base.fieldName)
-        val nowSensitive = !TypingPredictionPolicy.allows(info)
+        val nowSensitive = !RepliFieldPolicy.allows(info)
         val current = ReplyCaptureSession.state.value
         flogDebug { "RepliReply: onStartInput pkg=${incoming.packageName} field=${incoming.fieldId} sensitive=$nowSensitive session=${current?.id} phase=${current?.phase}" }
         if (current != null && FullScreenContextReviewSession.isActive(current.id) &&
