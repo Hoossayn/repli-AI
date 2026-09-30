@@ -50,6 +50,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.florisboard.lib.kotlin.collectIn
 import org.k3lp.lib.text.K3Descriptor
 import org.k3lp.lib.text.K3String
@@ -81,6 +83,7 @@ class ImeController(
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private val breakIterators = BreakIterators()
     private val expectedContentQueue = ExpectedContentQueue()
+    private val emojiCommitGuard = Mutex()
     private val _repliSuggestions = MutableStateFlow<List<WordPrediction>>(emptyList())
     val repliSuggestions = _repliSuggestions.asStateFlow()
     val repliAssistant = context?.let { RepliInputAssistant(it) { refreshRepliSuggestions() } }
@@ -163,6 +166,37 @@ class ImeController(
             resetContent(cursorRange, state.editor.getSurroundingText(WordPredictionEngine.BEFORE_LIMIT, WordPredictionEngine.AFTER_LIMIT))
             expectedContentQueue.push(state.content)
             refreshRepliSuggestions(state)
+        }
+    }
+
+    /** Inserts emoji without running the text transform while the editor may call back into the IME. */
+    suspend fun commitEmoji(text: String) {
+        if (text.isEmpty()) return
+        emojiCommitGuard.withLock {
+            if (repliReply?.isEditingInlineGuidance() == true) {
+                repliReply.typeGuidance(text)
+                return@withLock
+            }
+            val previous = snapshotState()
+            val selection = previous.content.selection
+            val connection = previous.editor.ic.get() ?: return@withLock
+            if (selection.start < 0 || selection.end < selection.start) return@withLock
+
+            // InputConnection calls can synchronously report a new cursor position. Never hold
+            // K3InputMethod's state mutex across them: that callback uses updateStateBlocking.
+            connection.finishComposingText()
+            if (!connection.commitText(text, 1)) return@withLock
+
+            val cursor = selection.start + text.length
+            updateState {
+                if (state.editor !== previous.editor) return@updateState
+                resetContent(
+                    K3TextRange(cursor, cursor),
+                    state.editor.getSurroundingText(WordPredictionEngine.BEFORE_LIMIT, WordPredictionEngine.AFTER_LIMIT),
+                )
+                expectedContentQueue.push(state.content)
+                refreshRepliSuggestions(state)
+            }
         }
     }
 
@@ -568,7 +602,7 @@ private class ExpectedContentQueue {
     fun popUntilOrNull(predicate: (K3Content) -> Boolean): K3Content? {
         while (list.isNotEmpty()) {
             val item = list[0]
-            if (predicate(item)) return item
+            if (predicate(item)) return list.removeAt(0)
             list.removeAt(0)
         }
         return null

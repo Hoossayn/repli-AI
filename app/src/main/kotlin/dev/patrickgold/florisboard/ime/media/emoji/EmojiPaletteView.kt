@@ -85,12 +85,14 @@ import dev.patrickgold.florisboard.R
 import dev.patrickgold.florisboard.app.FlorisPreferenceStore
 import dev.patrickgold.florisboard.editorInstance
 import dev.patrickgold.florisboard.ime.keyboard.FlorisImeSizing
+import dev.patrickgold.florisboard.ime.keyboard3.LocalImeController
 import dev.patrickgold.florisboard.ime.keyboard3.interaction.InteractionKind
 import dev.patrickgold.florisboard.ime.keyboard3.interaction.LocalInteractionController
 import dev.patrickgold.florisboard.ime.theme.FlorisImeUi
-import dev.patrickgold.florisboard.keyboardManager
 import dev.patrickgold.jetpref.datastore.model.collectAsState
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.florisboard.lib.android.AndroidKeyguardManager
 import org.florisboard.lib.android.showShortToast
 import org.florisboard.lib.android.systemService
@@ -135,7 +137,7 @@ fun EmojiPaletteView(
     val prefs by FlorisPreferenceStore
     val context = LocalContext.current
     val editorInstance by context.editorInstance()
-    val keyboardManager by context.keyboardManager()
+    val imeController = LocalImeController.current
 
     val activeEditorInfo by editorInstance.activeInfoFlow.collectAsState()
     val systemFontPaint = remember(Typeface.DEFAULT) {
@@ -194,9 +196,11 @@ fun EmojiPaletteView(
             isPinned = isPinned,
             isRecent = isRecent,
             onEmojiInput = { emoji ->
-                keyboardManager.inputEventDispatcher.sendDownUp(emoji)
                 scope.launch {
-                    EmojiHistoryHelper.markEmojiUsed(prefs, emoji)
+                    imeController.commitEmoji(emoji.value)
+                    withContext(Dispatchers.IO) {
+                        EmojiHistoryHelper.markEmojiUsed(prefs, emoji)
+                    }
                 }
             },
             onHistoryAction = {
