@@ -19,7 +19,6 @@ package dev.patrickgold.florisboard.ime.nlp.latin
 import android.content.Context
 import dev.patrickgold.florisboard.appContext
 import dev.patrickgold.florisboard.ime.core.Subtype
-import dev.patrickgold.florisboard.ime.editor.EditorContent
 import dev.patrickgold.florisboard.ime.nlp.SpellingProvider
 import dev.patrickgold.florisboard.ime.nlp.SpellingResult
 import dev.patrickgold.florisboard.ime.nlp.SuggestionCandidate
@@ -36,6 +35,7 @@ import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 import org.florisboard.lib.android.readText
 import org.florisboard.lib.kotlin.guardedByLock
+import org.k3lp.runtime.K3Content
 
 class LatinLanguageProvider(context: Context) : SpellingProvider, SuggestionProvider {
     companion object {
@@ -114,22 +114,22 @@ class LatinLanguageProvider(context: Context) : SpellingProvider, SuggestionProv
 
     override suspend fun suggest(
         subtype: Subtype,
-        content: EditorContent,
+        content: K3Content,
         maxCandidateCount: Int,
         allowPossiblyOffensive: Boolean,
         isPrivateSession: Boolean,
     ): List<SuggestionCandidate> {
         if (subtype.primaryLocale.language != "en" || maxCandidateCount <= 0 ||
-            !content.selection.isCursorMode) return emptyList()
-        val before = content.textBeforeSelection.takeLast(WordPredictionEngine.BEFORE_LIMIT)
-        val after = content.textAfterSelection.take(WordPredictionEngine.AFTER_LIMIT)
+            !content.selection.isCollapsed()) return emptyList()
+        val before = content.surroundingText.textBefore.takeLast(WordPredictionEngine.BEFORE_LIMIT)
+        val after = content.surroundingText.textAfter.take(WordPredictionEngine.AFTER_LIMIT)
         // FlorisBoard's completion API replaces only the composing word before the cursor.
         if (after.firstOrNull()?.let { it.isLetter() || it == '\'' || it == '’' } == true) return emptyList()
         val cursor = content.selection.start
         val context = TypingContext(before, after, cursor, cursor)
         val typedWord = before.takeLastWhile { it.isLetter() || it == '\'' || it == '’' }
         val correction = predictionEngine.autocorrection(context)
-            ?.takeIf { it.removeBefore == typedWord.length && content.composingText == typedWord }
+            ?.takeIf { it.removeBefore == typedWord.length && content.compositionText == typedWord }
         val predictions = predictionEngine.suggest(context)
         return buildList {
             if (correction != null) {
