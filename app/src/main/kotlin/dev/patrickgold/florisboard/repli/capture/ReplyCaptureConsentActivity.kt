@@ -64,17 +64,22 @@ class ReplyCaptureConsentActivity : ComponentActivity() {
         })
         promptLaunched = savedInstanceState?.getBoolean("prompt_launched") ?: false
         if (promptLaunched) return
-        if (preferences.getBoolean("disclosure_accepted", false)) confirmCaptureOrder()
+        if (preferences.getBoolean("disclosure_accepted", false)) continueAfterDisclosure()
         else AlertDialog.Builder(this)
             .setTitle("Read this chat to suggest replies")
-            .setMessage("Repli closes its keyboard and captures the current chat view first. For multiple pages, begin on the oldest page you want to share, then move only toward newer messages. Keep a little overlap and tap Capture view on the guided overlay or Repli notification for each next page. Repli preserves exactly that capture order and never rearranges pages. Tap Done when you have enough; an empty chat finishes on the first view. Android will ask you to allow screen sharing.\n\nRepli never writes captured images to device storage. If cloud replies are enabled, the bounded image sequence is sent for AI reading as explained in Settings → Privacy & FAQ; otherwise text recognition stays on your phone. Captured context clears when you leave the conversation or tap Clear.\n\nOnly visible pages you capture are included. You can review the text and correct who said what before inserting a reply. Screen sharing stops as soon as capture finishes.")
+            .setMessage("Repli closes its keyboard and reads the visible chat after Android asks you to allow screen sharing. You can add another page from Review chats if more context is needed.\n\nRepli never writes captured images to device storage. If cloud replies are enabled, the bounded image is sent for AI reading as explained in Settings → Privacy & FAQ; otherwise text recognition stays on your phone. Captured context clears when you leave the conversation or tap Clear.\n\nYou can review the text and correct who said what before generating replies. Screen sharing stops as soon as capture finishes.")
             .setPositiveButton("Continue") { _, _ ->
                 preferences.edit().putBoolean("disclosure_accepted", true).apply()
-                confirmCaptureOrder()
+                continueAfterDisclosure()
             }
             .setNegativeButton("Not now") { _, _ -> cancelCapture("Capture cancelled. Nothing was read.") }
             .setOnCancelListener { cancelCapture("Capture cancelled. Nothing was read.") }
             .showWithVisibleActions()
+    }
+
+    private fun continueAfterDisclosure() {
+        if (ReplyCaptureSession.state.value?.singleView == true) launchCapturePrompt()
+        else confirmCaptureOrder()
     }
 
     private fun AlertDialog.Builder.showWithVisibleActions(): AlertDialog = show().also { dialog ->

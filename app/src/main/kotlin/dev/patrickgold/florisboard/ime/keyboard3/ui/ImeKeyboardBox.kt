@@ -251,7 +251,7 @@ fun ImeKeyboardBox(
     }
 }
 
-internal fun visibleTouchKeySize(
+fun visibleTouchKeySize(
     keyboardWidth: Int,
     keyboardHeight: Int,
     keyWidth: Float,

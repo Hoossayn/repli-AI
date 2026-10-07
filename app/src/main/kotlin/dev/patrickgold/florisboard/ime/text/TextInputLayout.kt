@@ -38,6 +38,7 @@ import dev.patrickgold.florisboard.ime.smartbar.Smartbar
 import dev.patrickgold.florisboard.repli.ime.RepliInlineGuidance
 import dev.patrickgold.florisboard.repli.ime.RepliInlineGenerationBanner
 import dev.patrickgold.florisboard.repli.ime.RepliReadingBanner
+import dev.patrickgold.florisboard.repli.ime.RepliRecentMessagePrompt
 import dev.patrickgold.florisboard.repli.ime.RepliInlineSuggestionRow
 import dev.patrickgold.florisboard.repli.ime.RepliInlineToneBar
 import dev.patrickgold.florisboard.ime.smartbar.quickaction.QuickActionsOverflowPanel
@@ -73,6 +74,9 @@ fun TextInputLayout(
                 viewCount = repliUi.reviewFrames,
                 onCancel = { imeController.repliReply.clear() },
             )
+        }
+        if (repliUi?.quickReplyPrompt != null) {
+            RepliRecentMessagePrompt()
         }
         if (repliUi?.guidanceOpen == true) {
             RepliInlineGuidance()

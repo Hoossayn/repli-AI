@@ -21,6 +21,7 @@ data class ReplyCaptureState(
     val turns: List<ConversationTurn> = emptyList(),
     val replies: List<String> = emptyList(),
     val frames: Int = 0,
+    val singleView: Boolean = false,
     val viewport: CaptureViewport? = null,
     val awaitingKeyboardReturn: Boolean = false,
     val consentActivityOpened: Boolean = false,
@@ -44,6 +45,7 @@ object ReplyCaptureSession {
         editor: ReplyEditor,
         append: Boolean = false,
         viewport: CaptureViewport? = null,
+        singleView: Boolean = false,
     ): ReplyCaptureState {
         val previous = mutable.value?.takeIf { it.editor == editor }
         mutable.value?.id?.let(ReviewEvidenceStore::discard)
@@ -53,6 +55,7 @@ object ReplyCaptureSession {
             // context, but its coordinates must not point at a different screenshot.
             turns = if (append) previous?.turns.orEmpty().map { it.copy(source = null) } else emptyList(),
             frames = if (append) previous?.frames ?: 0 else 0,
+            singleView = singleView,
             instructions = previous?.instructions,
             viewport = viewport,
             awaitingKeyboardReturn = viewport != null,

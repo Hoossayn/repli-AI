@@ -265,7 +265,9 @@ class ReplyScreenCaptureService : Service() {
         framesCaptured += 1
         lastCapturedSignature = signature
         val now = SystemClock.elapsedRealtime()
-        val decision = ReplyManualCapturePolicy.afterFrame(
+        val decision = if (ReplyCaptureSession.state.value?.singleView == true) {
+            ManualCaptureDecision.USER_DONE
+        } else ReplyManualCapturePolicy.afterFrame(
             framesCaptured = (ReplyCaptureSession.state.value?.frames ?: 0) + framesCaptured,
             totalTurns = capturedTurns.size,
             elapsedMs = if (manualCaptureStartedAt == 0L) 0L else now - manualCaptureStartedAt,

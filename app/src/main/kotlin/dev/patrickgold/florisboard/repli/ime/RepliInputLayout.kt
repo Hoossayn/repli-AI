@@ -159,6 +159,38 @@ fun RepliInlineGenerationBanner(modifier: Modifier = Modifier) {
 }
 
 @Composable
+fun RepliRecentMessagePrompt(modifier: Modifier = Modifier) {
+    val controller = LocalImeController.current.repliReply ?: return
+    val prompt = controller.uiState.collectAsState().value.quickReplyPrompt ?: return
+    Surface(
+        modifier = modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+        shape = CardShape, color = Card, border = BorderStroke(1.dp, Line),
+    ) {
+        Row(Modifier.padding(start = 11.dp, end = 5.dp, top = 7.dp, bottom = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.weight(1f)) {
+                Text("${prompt.chatName} · ${prompt.personaName}", color = Accent,
+                    fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(prompt.message, color = Ink, fontSize = 12.sp,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            Button(onClick = controller::generateFromRecentMessage,
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Accent),
+                contentPadding = PaddingValues(horizontal = 11.dp, vertical = 4.dp)) {
+                Text("Generate", color = OnAccent, fontSize = 11.sp)
+            }
+            IconButton(onClick = controller::dismissRecentMessagePrompt,
+                modifier = Modifier.size(28.dp)) {
+                Icon(Icons.Default.Close, contentDescription = "Dismiss recent message", tint = Muted)
+            }
+        }
+    }
+}
+
+@Composable
 fun RepliInputLayout(modifier: Modifier = Modifier) {
     val imeController = LocalImeController.current
     val orchestrator = imeController.repliReply
@@ -289,7 +321,9 @@ fun RepliInputLayout(modifier: Modifier = Modifier) {
                 verticalAlignment = Alignment.CenterVertically) {
                 Text("${ui.reviewFrames} view${if (ui.reviewFrames == 1) "" else "s"} · ${ui.reviewTurns.size} messages",
                     color = Muted, fontSize = 11.sp, modifier = Modifier.weight(1f))
-                if (ui.reviewFrames < 4) SmallAction("Add page") { orchestrator.beginCapture(append = true) }
+                if (ui.reviewFrames < 4) SmallAction("Add page") {
+                    orchestrator.beginCapture(append = true, singleView = true)
+                }
             }
             ui.captureWarning?.let { warning ->
                 Text(warning, modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 3.dp),

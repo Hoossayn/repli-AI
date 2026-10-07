@@ -375,7 +375,12 @@ class ImeController(
                 flags = state.flags
                     .withKeyVariation(keyVariation)
                     .withImeUiMode(
-                        if (repliReply?.onStartInput(info) == true) {
+                        if (repliReply?.onStartInput(
+                                info,
+                                composerEmpty = initialSurrounding.textBefore.isBlank() &&
+                                    initialSurrounding.textSelected.isBlank() &&
+                                    initialSurrounding.textAfter.isBlank(),
+                            ) == true) {
                             ImeUiMode.REPLI
                         } else if (state.flags.imeUiMode != ImeUiMode.CLIPBOARD || prefs.clipboard.historyHideOnNextTextField.get()) {
                             ImeUiMode.TEXT

@@ -35,6 +35,8 @@ import dev.patrickgold.florisboard.repli.data.RemoteGenerationPreferences
 import dev.patrickgold.florisboard.repli.identity.ConfirmedConversationIdentity
 import dev.patrickgold.florisboard.repli.identity.ConversationIdentityResolution
 import dev.patrickgold.florisboard.repli.identity.ConversationIdentityResolver
+import dev.patrickgold.florisboard.repli.identity.SavedChatAutoSuggestion
+import dev.patrickgold.florisboard.repli.identity.SavedChatAutoSuggestionPolicy
 import dev.patrickgold.florisboard.repli.identity.CapturedContactProfileMatcher
 import dev.patrickgold.florisboard.repli.identity.CapturedContactName
 import dev.patrickgold.florisboard.repli.profile.ProfileMatcher
@@ -88,6 +90,7 @@ data class RepliApprovalCard(
 
 data class ChatOption(val id: String, val name: String, val styleName: String)
 data class PersonaOption(val id: String, val name: String, val description: String)
+data class RepliQuickReplyPrompt(val chatName: String, val personaName: String, val message: String)
 
 data class RepliReplyUiState(
     val active: Boolean = false,
@@ -118,6 +121,7 @@ data class RepliReplyUiState(
     val selectedProfileName: String? = null,
     val selectedPersonaId: String = "casual",
     val selectedPersonaName: String = "Easy Breezy",
+    val quickReplyPrompt: RepliQuickReplyPrompt? = null,
     val voice: VoiceRecordingState? = null,
     val voicePreview: String = "",
     val voiceAccepted: String? = null,
@@ -166,6 +170,8 @@ class RepliReplyOrchestrator(
     private var defaultPersonaId = "casual"
     private var confirmedIdentity: ConfirmedConversationIdentity? = null
     private var contextLoadGeneration = 0
+    private var preparedNotification: SavedChatAutoSuggestion? = null
+    private var lastOfferedNotificationKey: String? = null
     private var pendingRemoteRequest: PreparedRemoteReplyRequest? = null
     private var lastApprovedRequest: PreparedRemoteReplyRequest? = null
     private var pendingMore = false
@@ -202,7 +208,7 @@ class RepliReplyOrchestrator(
     // Returns true when this start is the deliberate capture return that must
     // restore the reply panel; every other start invalidates prior context.
 
-    fun onStartInput(info: FlorisEditorInfo): Boolean {
+    fun onStartInput(info: FlorisEditorInfo, composerEmpty: Boolean): Boolean {
         val incoming = ReplyEditor(info.packageName ?: "", info.base.fieldId, info.base.fieldName)
         val nowSensitive = !RepliFieldPolicy.allows(info)
         val current = ReplyCaptureSession.state.value
@@ -253,6 +259,7 @@ class RepliReplyOrchestrator(
         selectedProfileId = null
         defaultPersonaId = "casual"
         confirmedIdentity = null
+        preparedNotification = null
         if (nowSensitive) {
             profiles = emptyList()
             recentMessages = emptyList()
@@ -260,12 +267,12 @@ class RepliReplyOrchestrator(
             suggestion = null
             publish()
         } else if (changed) {
-            loadContext(incoming.packageName)
+            loadContext(incoming.packageName, composerEmpty)
         }
         return false
     }
 
-    private fun loadContext(packageName: String) {
+    private fun loadContext(packageName: String, composerEmpty: Boolean) {
         val generation = ++contextLoadGeneration
         scope.launch(Dispatchers.IO) {
             val loadedProfiles = ProfileRepository(appContext).profiles()
@@ -282,12 +289,58 @@ class RepliReplyOrchestrator(
                 }
                 resolution = ConversationIdentityResolver.resolve(packageName, recent)
                 suggestion = resolution as? ConversationIdentityResolution.Suggestion
+                val candidate = SavedChatAutoSuggestionPolicy.select(
+                    resolution, loadedProfiles, recent, composerEmpty,
+                )
+                if (candidate != null && candidate.key != lastOfferedNotificationKey &&
+                    editor?.packageName == packageName && !sensitive &&
+                    ReplyCaptureSession.state.value == null) {
+                    preparedNotification = candidate
+                    lastOfferedNotificationKey = candidate.key
+                }
                 publish()
             }
         }
     }
 
     // Entry points
+
+    /** Called only by the user's Generate tap on the prepared notification prompt. */
+    fun generateFromRecentMessage() {
+        val offered = preparedNotification ?: return
+        val target = editor ?: return
+        if (sensitive || ReplyCaptureSession.state.value != null) return
+        preparedNotification = null
+        publish()
+        scope.launch(Dispatchers.IO) {
+            val latest = RecentMessageRepository(appContext).recentFor(target.packageName)
+            val savedProfiles = ProfileRepository(appContext).profiles()
+            val fresh = SavedChatAutoSuggestionPolicy.select(
+                ConversationIdentityResolver.resolve(target.packageName, latest),
+                savedProfiles, latest, composerEmpty = true,
+            )
+            withContext(Dispatchers.Main) {
+                if (editor != target || sensitive || ReplyCaptureSession.state.value != null) return@withContext
+                if (fresh?.key != offered.key) {
+                    update { it.copy(active = true, status = "This message changed. Read the latest chat to continue.") }
+                    return@withContext
+                }
+                profiles = savedProfiles
+                selectedProfileId = fresh.profile.id
+                suggestion = null
+                confirmedIdentity = null
+                val session = ReplyCaptureSession.beginWithContext(
+                    target, listOf(ConversationTurn(fresh.message.text, fromMe = false)),
+                )
+                generate(session)
+            }
+        }
+    }
+
+    fun dismissRecentMessagePrompt() {
+        preparedNotification = null
+        publish()
+    }
 
     fun beginSuggestion() {
         val target = editor ?: return
@@ -299,7 +352,7 @@ class RepliReplyOrchestrator(
         if (state != null && state.busy) return
         flogDebug { "RepliReply: beginSuggestion turns=${state?.turns?.size} seed=${trustedSeed() != null}" }
         if (state != null && state.turns.isNotEmpty() && state.editor == target) {
-            beginCapture(append = false)
+            beginCapture(append = false, singleView = true)
             return
         }
         val seed = trustedSeed()
@@ -307,7 +360,7 @@ class RepliReplyOrchestrator(
             update { it.copy(active = true) }
             ReplyCaptureSession.beginWithContext(target, listOf(ConversationTurn(seed, fromMe = false)))
         } else {
-            beginCapture(append = false)
+            beginCapture(append = false, singleView = true)
         }
     }
 
@@ -372,7 +425,7 @@ class RepliReplyOrchestrator(
         generate(state, approved = lastApprovedRequest, more = true)
     }
 
-    fun beginCapture(append: Boolean) {
+    fun beginCapture(append: Boolean, singleView: Boolean = false) {
         val target = editor ?: return
         if (sensitive) return
         if (append && (ReplyCaptureSession.state.value?.frames ?: 0) >= ReplyManualCapturePolicy.MAX_FRAMES) {
@@ -431,7 +484,7 @@ class RepliReplyOrchestrator(
             update { it.copy(active = true, status = "Screen capture is disabled for this phone profile by its administrator.") }
             return
         }
-        val begun = ReplyCaptureSession.begin(target, append, viewport)
+        val begun = ReplyCaptureSession.begin(target, append, viewport, singleView)
         update { it.copy(active = true) }
         try {
             // Start while the IME is still visible. Hiding first can remove Android's
@@ -459,6 +512,7 @@ class RepliReplyOrchestrator(
     }
 
     fun clear() {
+        preparedNotification = null
         generation?.cancel()
         captureLaunch?.cancel()
         readingJob?.cancel()
@@ -1274,7 +1328,7 @@ class RepliReplyOrchestrator(
         val voiceState = voiceRecorder?.let { if (voiceDraftId != null) it.state else null }
         val reviewChatName = (capturedChatName ?: selectedProfile()?.name)?.let { name ->
             if (session?.editor?.packageName == appContext.packageName &&
-                !name.endsWith("· practice chat", ignoreCase = true)) "$name · practice chat" else name
+                !name.endsWith("practice chat", ignoreCase = true)) "$name · practice chat" else name
         }
         mutable.value = current.copy(
             active = active,
@@ -1312,6 +1366,14 @@ class RepliReplyOrchestrator(
             selectedPersonaName = personas.firstOrNull {
                 it.id == (selectedProfile()?.personaId ?: defaultPersonaId)
             }?.name ?: "Easy Breezy",
+            quickReplyPrompt = preparedNotification?.takeIf { session == null }?.let { candidate ->
+                RepliQuickReplyPrompt(
+                    chatName = candidate.profile.name,
+                    personaName = personas.firstOrNull { it.id == candidate.profile.personaId }?.name
+                        ?: "Easy Breezy",
+                    message = candidate.message.text.take(160),
+                )
+            },
             voice = voiceState,
             voicePreview = voiceState?.partial?.let { VoiceGuidanceText.combine(voiceBase, it) } ?: "",
             voiceAccepted = voiceAccepted,
