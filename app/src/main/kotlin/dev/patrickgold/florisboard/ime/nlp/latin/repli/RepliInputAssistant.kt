@@ -28,11 +28,12 @@ class RepliInputAssistant(context: Context, private val onReady: () -> Unit) {
         scope.launch {
             runCatching {
                 appContext.assets.open("ime/dict/repli-en_us.dict").use { main ->
-                    val supplement = runCatching { appContext.assets.open("ime/dict/repli-en_ng.supplement") }.getOrNull()
+                    val supplements = listOf("ime/dict/repli-en_ng.supplement", "ime/dict/repli-ng_languages.supplement")
+                        .mapNotNull { name -> runCatching { appContext.assets.open(name) }.getOrNull() }
                     try {
-                        BundledKeyboardLexicon.load(main, listOfNotNull(supplement))
+                        BundledKeyboardLexicon.load(main, supplements)
                     } finally {
-                        supplement?.close()
+                        supplements.forEach { it.close() }
                     }
                 }
             }.onSuccess(engine::installLexicon)
@@ -66,6 +67,12 @@ class RepliInputAssistant(context: Context, private val onReady: () -> Unit) {
     fun rejectCorrection(contextBeforeWord: String, originalWord: String, privateSession: Boolean = false) {
         engine.rejectCorrection(originalWord)
         if (!privateSession) learn(contextBeforeWord, originalWord)
+    }
+
+    /** Remembers an emoji the user inserted, so a favourite can be offered after a sentence. */
+    fun learnEmoji(emoji: String) {
+        if (!ready || !preferences.enabled) return
+        if (model.recordEmoji(emoji)) scheduleSave()
     }
 
     fun learn(contextBeforeWord: String, committedWord: String) {

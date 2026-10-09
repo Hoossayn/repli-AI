@@ -113,3 +113,102 @@ class WordPredictionEngineTest {
         assertTrue(engine.suggest(TypingContext("hell", "", 4, 4), includeAdaptive = false).any { it.word == "hello" })
     }
 }
+
+class RichAutocorrectTest {
+    private val engine = WordPredictionEngine().apply {
+        val dictionary = File("src/main/assets/ime/dict/repli-en_us.dict")
+        val supplement = File("src/main/assets/ime/dict/repli-en_ng.supplement")
+        val languages = File("src/main/assets/ime/dict/repli-ng_languages.supplement")
+        dictionary.inputStream().use { main ->
+            supplement.inputStream().use { extra ->
+                languages.inputStream().use { more -> installLexicon(BundledKeyboardLexicon.load(main, listOf(extra, more))) }
+            }
+        }
+        File("src/main/assets/ime/dict/repli-en_chat.ngrams").inputStream().use { installChatModel(ChatNgramModel.load(it)) }
+    }
+
+    @Test
+    fun `prefers chat-common words, leaves shorthand and stretched words alone`() {
+        assertEquals("thanks", correct("thnks"))
+        assertNull(correct("yeahh"))
+        assertNull(correct("helloo"))
+        assertNull(correct("pleaseee"))
+        assertNull(correct("okk"))
+        assertNull(correct("gud"))
+        assertNull(correct("yup"))
+        assertNull(correct("omw"))
+        assertNull(correct("lool"))
+    }
+
+    @Test
+    fun `local-language words complete but never shield an English typo`() {
+        assertTrue(engine.suggest(TypingContext("kaab", "", 4, 4)).any { it.word == "kaabo" })
+        assertTrue(engine.suggest(TypingContext("nago", "", 4, 4)).any { it.word == "nagode" })
+        assertTrue(engine.suggest(TypingContext("daal", "", 4, 4)).any { it.word == "daalu" })
+        // "ise" is Yoruba for work but, before the user has ever kept it, it reads as an English typo.
+        assertTrue(correct("ise") != null)
+        val learned = AdaptiveLanguageModel().apply { observe(listOf("mo"), "ise") }
+        engine.installAdaptiveModel(learned)
+        assertNull(correct("ise"))
+        engine.installAdaptiveModel(AdaptiveLanguageModel())
+    }
+
+    private fun correct(text: String) = engine.autocorrection(TypingContext(text, "", text.length, text.length))?.word
+
+    @Test
+    fun `restores missing apostrophes for any common contraction`() {
+        assertEquals("why's", correct("whys"))
+        assertEquals("where's", correct("wheres"))
+        assertEquals("I'm", correct("im"))
+        assertEquals("I've", correct("ive"))
+        assertEquals("you're", correct("youre"))
+        assertEquals("wouldn't", correct("wouldnt"))
+        assertEquals("let's", correct("lets"))
+        assertEquals("What's", correct("Whats"))
+        assertEquals("I", correct("i"))
+        // Real words stay: "well", "were", "ill" and "id" are too often meant literally.
+        assertNull(correct("well"))
+        assertNull(correct("were"))
+        assertNull(correct("ill"))
+        assertNull(correct("id"))
+        // ...but the contraction is still offered as a suggestion for the chat-likely ones.
+        assertTrue(engine.suggest(TypingContext("ill", "", 3, 3)).any { it.word == "I'll" })
+        assertTrue(engine.suggest(TypingContext("well", "", 4, 4)).none { it.word == "we'll" })
+    }
+
+    @Test
+    fun `fixes two-edit typos on neighbouring keys when there is a clear winner`() {
+        assertEquals("because", correct("becsuse"))
+        assertEquals("tomorrow", correct("tomorrpw"))
+        assertEquals("morning", correct("mornjng"))
+        assertEquals("message", correct("mesaage"))
+        assertNull(correct("xqzvbn"))
+        assertNull(correct("Tolani"))
+    }
+
+    @Test
+    fun `offers the favourite emoji after a finished sentence once it is a habit`() {
+        val model = AdaptiveLanguageModel().apply { listOf("🙏", "😂", "🙏", "😊").forEach { recordEmoji(it) } }
+        engine.installAdaptiveModel(model)
+        val afterSentence = engine.suggest(TypingContext("See you tomorrow. ", "", 18, 18)).map { it.word }
+        assertEquals("😊", afterSentence.last())
+        assertTrue(engine.suggest(TypingContext("", "", 0, 0)).none { it.word == "😊" })
+        engine.installAdaptiveModel(AdaptiveLanguageModel().apply { recordEmoji("🙏") })
+        assertTrue(engine.suggest(TypingContext("Ok. ", "", 4, 4)).none { it.word == "🙏" })
+    }
+}
+
+class KeyboardProximityTest {
+    @Test
+    fun `neighbouring keys cost less than distant ones`() {
+        assertTrue(KeyboardProximity.adjacent('a', 's'))
+        assertTrue(KeyboardProximity.adjacent('t', 'g'))
+        assertTrue(KeyboardProximity.adjacent('q', 'a'))
+        assertTrue(!KeyboardProximity.adjacent('q', 'p'))
+        assertEquals(0.5, KeyboardProximity.distance("tje", "the"))
+        assertEquals(1.0, KeyboardProximity.distance("tze", "the"))
+        assertEquals(0.7, KeyboardProximity.distance("teh", "the"))
+        assertEquals(1.0, KeyboardProximity.distance("the", "them"))
+        assertTrue(KeyboardProximity.distance("abcdef", "zzzzzz", 1.6) > 1.6)
+    }
+}

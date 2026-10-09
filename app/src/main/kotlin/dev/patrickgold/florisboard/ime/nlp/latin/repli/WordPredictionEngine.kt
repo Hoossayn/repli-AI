@@ -91,8 +91,9 @@ class WordPredictionEngine {
                     loadedLexicon.completions(normalized, 6).map(LexiconWord::word))
                     .distinctBy { it.lowercase(Locale.ROOT) }
                     .filterNot { it.equals(normalized, ignoreCase = true) }
-                // Keep the contraction visible while typing, including when the bare word is valid.
-                val contraction = AMBIGUOUS_CONTRACTIONS[normalized]?.let(::listOf).orEmpty()
+                // Keep the contraction visible while typing, including when the bare word is valid
+                // ("ill" → "I'll", "lets" → "let's"); the autocorrect decision is made separately.
+                val contraction = CONTRACTIONS[normalized]?.takeIf { normalized !in NEVER_SUGGEST_CONTRACTION }?.let(::listOf).orEmpty()
                 if (completions.isNotEmpty() || contraction.isNotEmpty()) contraction + completions else {
                     val corrections = if (normalized in PROTECTED_DIALECT_WORDS) emptyList() else (
                         adaptive?.corrections(normalized, 3).orEmpty() +
@@ -110,7 +111,11 @@ class WordPredictionEngine {
             // Corpus message openers, one per word family (i / i'm / i've count once), then the old defaults.
             val openers = chatModel?.sentenceStarts(12).orEmpty().map(ChatNgramModel.ScoredWord::word)
                 .distinctBy { it.substringBefore('\'') }
-            (openers + listOf("hello", "i", "thanks")).distinct()
+            // After a finished sentence, someone who uses emoji gets their favourite as the third pick.
+            val emoji = adaptiveModel.takeIf { adaptiveEnabled && includeAdaptive && before.isNotBlank() }
+                ?.recentEmojis()?.takeIf { it.size >= EMOJI_HABIT_MINIMUM }?.firstOrNull()
+            val base = (openers + listOf("hello", "i", "thanks")).distinct()
+            if (emoji != null) base.take(2) + emoji else base
         } else {
             nextWordCandidates(tokens, includeAdaptive)
         }
@@ -119,6 +124,7 @@ class WordPredictionEngine {
         val removeAfter = suffix.length + if (tail.startsWith(' ')) 1 else 0
         return words.distinct().map { word ->
             val display = when {
+                word.none(Char::isLetter) -> word
                 prefix.length > 1 && prefix.filter(Char::isLetter).all(Char::isUpperCase) -> word.uppercase(Locale.ROOT)
                 prefix.firstOrNull()?.isUpperCase() == true || (prefix.isEmpty() && sentenceStart) -> word.replaceFirstChar(Char::uppercaseChar)
                 word == "i" || word.startsWith("i'") -> word.replaceFirstChar(Char::uppercaseChar)
@@ -168,36 +174,81 @@ class WordPredictionEngine {
         val chunk = context.before.takeLastWhile { !it.isWhitespace() }
         if (chunk.contains('@') || chunk.contains("://") || chunk.startsWith("www.", true)) return null
         val prefix = context.before.takeLastWhile(::wordCharacter)
-        if (prefix.length !in 3..20 || prefix.any { !wordCharacter(it) }) return null
+        if (prefix.length !in 1..20 || prefix.any { !wordCharacter(it) }) return null
         val normalized = prefix.lowercase(Locale.ROOT).replace('’', '\'')
-        // Common Nigerian Pidgin words should never be "fixed" into a different English word.
-        if (normalized in PROTECTED_DIALECT_WORDS) return null
         // The user already undid this correction once; respect that for the rest of the session.
         if (isRejectedCorrection(normalized)) return null
+        // A lone lowercase "i" is always the pronoun.
+        if (prefix == "i") return WordPrediction("I", 1, 0, space = false, correction = true)
+        if (prefix.length < 2) return null
+        // Common Nigerian Pidgin words should never be "fixed" into a different English word.
+        if (normalized in PROTECTED_DIALECT_WORDS) return null
         // A capitalised word that does not start a sentence is most likely a name (Tunde, Ola, Lagos).
         if (looksLikeProperNoun(prefix, context.before.dropLast(prefix.length))) return null
-        // Repli prefers the contraction in chat; immediate Backspace can restore the possessive.
-        if (normalized == "its") {
-            return WordPrediction(preserveCase("it's", prefix, false), prefix.length, 0, space = false, correction = true)
-        }
-        // Correct other missing apostrophes only where the bare spelling is uncommon.
-        UNAMBIGUOUS_CONTRACTIONS[normalized]?.let { contraction ->
+        val loadedLexicon = lexicon
+        // Missing apostrophes: "whys" → "why's", "im" → "I'm", "dont" → "don't". Applied when the bare
+        // spelling is not an English word (or is one Repli deliberately overrides in chat, like "its").
+        contractionFor(normalized, loadedLexicon)?.let { contraction ->
             return WordPrediction(preserveCase(contraction, prefix, false), prefix.length, 0, space = false, correction = true)
         }
+        if (prefix.length < 3) return null
         val adaptive = adaptiveModel.takeIf { adaptiveEnabled && includeAdaptive }
         if (adaptive?.contains(normalized) == true) return null
-        val loadedLexicon = lexicon ?: return null
+        if (loadedLexicon == null) return null
         if (loadedLexicon.contains(normalized)) return null
-        val best = loadedLexicon.corrections(normalized, 2)
-        val winner = best.firstOrNull() ?: return null
-        // One edit is one edit: single-edit typos share the transposition confidence bar.
-        // Calibrated against the shipped list, where everyday words sit well below the old
-        // 145 bar (hello 120, thanks 122, morning 136) while the candidate floor stays 100.
-        val confident = winner.frequency >= CONFIDENT_FREQUENCY ||
-            winner.word.lowercase(Locale.ROOT) in ALWAYS_CORRECT
-        if (!confident) return null
-        val display = preserveCase(winner.word, prefix, sentenceStart = false)
-        return WordPrediction(display, prefix.length, 0, space = false, correction = true)
+        // "yeahh", "helloo", "okk": a real word stretched for emphasis is not a typo.
+        if (isElongation(normalized, loadedLexicon)) return null
+        val best = rankForChat(loadedLexicon.corrections(normalized, 5))
+        val winner = best.firstOrNull()
+        if (winner != null) {
+            // One edit is one edit: single-edit typos share the transposition confidence bar.
+            // Calibrated against the shipped list, where everyday words sit well below the old
+            // 145 bar (hello 120, thanks 122, morning 136) while the candidate floor stays 100.
+            val confident = winner.frequency >= CONFIDENT_FREQUENCY ||
+                winner.word.lowercase(Locale.ROOT) in ALWAYS_CORRECT
+            if (!confident) return null
+            val display = preserveCase(winner.word, prefix, sentenceStart = false)
+            return WordPrediction(display, prefix.length, 0, space = false, correction = true)
+        }
+        // Nothing within one edit: try two keyboard-aware edits, but only with a clear winner.
+        val fuzzy = loadedLexicon.fuzzyCorrections(normalized, 2)
+        val top = fuzzy.firstOrNull() ?: return null
+        val runnerUp = fuzzy.getOrNull(1)
+        if (top.frequency < CONFIDENT_FREQUENCY) return null
+        if (runnerUp != null && runnerUp.cost - top.cost < FUZZY_MARGIN && runnerUp.frequency >= top.frequency) return null
+        return WordPrediction(preserveCase(top.word, prefix, sentenceStart = false), prefix.length, 0, space = false, correction = true)
+    }
+
+    /** Candidates re-ranked by how common they are in chat, so "thnks" becomes "thanks", not "tanks". */
+    private fun rankForChat(candidates: List<LexiconWord>): List<LexiconWord> {
+        val chat = chatModel ?: return candidates
+        if (candidates.size < 2) return candidates
+        return candidates.sortedByDescending { candidate ->
+            candidate.frequency + CHAT_RANK_WEIGHT * kotlin.math.ln(1.0 + chat.chatCount(candidate.word))
+        }
+    }
+
+    private fun isElongation(normalized: String, loadedLexicon: KeyboardLexicon): Boolean {
+        if (normalized.length < 3) return false
+        val last = normalized.last()
+        var run = 0
+        for (c in normalized.reversed()) { if (c == last) run++ else break }
+        if (run < 2) return false
+        val stem = normalized.dropLast(run)
+        return loadedLexicon.contains(stem + last) || loadedLexicon.contains(stem + last + last) ||
+            (stem.length >= 2 && loadedLexicon.contains(stem))
+    }
+
+    /**
+     * The contraction a bare word most likely meant, or null. Bare words that are real English
+     * words ("well", "were", "ill") are left alone except for Repli's chat overrides.
+     */
+    private fun contractionFor(normalized: String, loadedLexicon: KeyboardLexicon?): String? {
+        if (normalized.contains('\'')) return null
+        val contraction = CONTRACTIONS[normalized] ?: return null
+        if (normalized in CONTRACTION_OVERRIDES) return contraction
+        val bareIsWord = loadedLexicon?.contains(normalized) ?: (normalized in vocabulary)
+        return if (bareIsWord) null else contraction
     }
 
     private fun looksLikeProperNoun(prefix: String, beforeWord: String): Boolean {
@@ -229,13 +280,24 @@ class WordPredictionEngine {
             word.lowercase(Locale.ROOT).replace('’', '\'') in PROTECTED_DIALECT_WORDS
         private val tokenPattern = Regex("[a-z]+(?:'[a-z]+)?")
         private val ALWAYS_CORRECT = setOf("the", "and", "you", "that", "with", "this", "have", "for")
-        private val AMBIGUOUS_CONTRACTIONS = mapOf("its" to "it's")
-        private val UNAMBIGUOUS_CONTRACTIONS = mapOf(
-            "dont" to "don't", "doesnt" to "doesn't", "didnt" to "didn't",
-            "cant" to "can't", "wont" to "won't", "isnt" to "isn't",
-            "arent" to "aren't", "youre" to "you're", "theyre" to "they're",
-            "weve" to "we've", "ive" to "I've", "thats" to "that's",
-        )
+        private const val FUZZY_MARGIN = 0.3
+        private const val CHAT_RANK_WEIGHT = 40.0
+        private const val EMOJI_HABIT_MINIMUM = 3
+        /** Every common English contraction, keyed by its apostrophe-less spelling. */
+        private val CONTRACTIONS: Map<String, String> = listOf(
+            "I'm", "I'll", "I'd", "I've",
+            "you're", "you'll", "you'd", "you've", "we're", "we'll", "we'd", "we've",
+            "they're", "they'll", "they'd", "they've", "he's", "he'll", "he'd", "she's", "she'll", "she'd",
+            "it's", "it'll", "it'd", "that's", "that'll", "there's", "there'll", "here's", "where's", "when's",
+            "what's", "what'll", "who's", "who'll", "who'd", "how's", "why's", "let's",
+            "isn't", "aren't", "wasn't", "weren't", "don't", "doesn't", "didn't", "can't", "couldn't",
+            "won't", "wouldn't", "shouldn't", "hasn't", "haven't", "hadn't", "mustn't", "needn't", "ain't",
+            "y'all", "ma'am", "o'clock",
+        ).associateBy { it.replace("'", "").lowercase(Locale.ROOT) }
+        /** Bare spellings that are English words but, in chat, almost always mean the contraction. */
+        private val CONTRACTION_OVERRIDES = setOf("its", "lets", "cant", "wont", "thats", "whats", "hows")
+        /** Bare words common enough that offering the contraction would only be noise. */
+        private val NEVER_SUGGEST_CONTRACTION = setOf("well", "were", "wed", "hell", "shell")
         private val PROTECTED_DIALECT_WORDS = setOf(
             "abeg", "abi", "dey", "don", "na", "oya", "sef", "sha", "una", "wahala", "wetin",
         )

@@ -4,6 +4,7 @@
 Usage: build_chat_ngrams.py <csv>... --out repli-en_chat.ngrams [--bigram-min 3] [--trigram-min 3]
 
 Output (gzip text, one record per line):
+  U\t<word>:<count>|...              unigram counts (words seen at least --unigram-min times)
   S\t<word>:<count>|...              sentence-start words (first token of a message)
   B\t<w1>\t<next>:<count>|...        next-word candidates after one word
   T\t<w1> <w2>\t<next>:<count>|...   next-word candidates after two words
@@ -37,9 +38,10 @@ def main():
     ap.add_argument("--trigram-min", type=int, default=3)
     ap.add_argument("--top", type=int, default=5)
     ap.add_argument("--start-top", type=int, default=12)
+    ap.add_argument("--unigram-min", type=int, default=5)
     args = ap.parse_args()
 
-    starts = Counter(); bigrams = defaultdict(Counter); trigrams = defaultdict(Counter)
+    starts = Counter(); unigrams = Counter(); bigrams = defaultdict(Counter); trigrams = defaultdict(Counter)
     n_msgs = 0
     for message in messages(args.csv):
         n_msgs += 1
@@ -49,6 +51,7 @@ def main():
             if not toks:
                 continue
             starts[toks[0]] += 1
+            unigrams.update(toks)
             for i in range(1, len(toks)):
                 bigrams[toks[i-1]][toks[i]] += 1
                 if i >= 2:
@@ -63,6 +66,8 @@ def main():
         out.write("# Repli chat n-gram prior v1\n")
         out.write("# Source: Synthetic-Persona-Chat (Google, CC BY 4.0), github.com/google-research-datasets/Synthetic-Persona-Chat\n")
         out.write(f"# Messages: {n_msgs}; bigram contexts min count {args.bigram_min}; trigram contexts min count {args.trigram_min}; top {args.top} per context\n")
+        uni = [(w, c) for w, c in unigrams.most_common() if c >= args.unigram_min]
+        out.write("U\t" + "|".join(f"{w}:{c}" for w, c in uni) + "\n")
         start_items = top(starts, 1, args.start_top)
         out.write("S\t" + "|".join(f"{w}:{c}" for w, c in start_items) + "\n")
         for w1 in sorted(bigrams):
@@ -75,7 +80,7 @@ def main():
             if items:
                 kept_t += 1
                 out.write(f"T\t{w1} {w2}\t" + "|".join(f"{w}:{c}" for w, c in items) + "\n")
-    print(f"messages={n_msgs} bigram_contexts={kept_b} trigram_contexts={kept_t} starts={start_items[:12]}", file=sys.stderr)
+    print(f"messages={n_msgs} unigrams={len(uni)} bigram_contexts={kept_b} trigram_contexts={kept_t} starts={start_items[:12]}", file=sys.stderr)
 
 if __name__ == "__main__":
     main()

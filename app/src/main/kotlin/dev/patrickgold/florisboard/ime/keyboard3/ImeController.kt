@@ -237,6 +237,7 @@ class ImeController(
 
     /** Inserts emoji without running the text transform while the editor may call back into the IME. */
     suspend fun commitEmoji(text: String) {
+        if (!activeState.value.flags.isIncognitoMode) repliAssistant?.learnEmoji(text)
         if (text.isEmpty()) return
         emojiCommitGuard.withLock {
             if (repliReply?.isEditingInlineGuidance() == true) {

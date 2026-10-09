@@ -13,12 +13,16 @@ import java.util.zip.GZIPInputStream
  */
 class ChatNgramModel private constructor(
     private val starts: List<ScoredWord>,
+    private val unigrams: Map<String, Int>,
     private val bigrams: Map<String, List<ScoredWord>>,
     private val trigrams: Map<String, List<ScoredWord>>,
 ) {
     data class ScoredWord(val word: String, val count: Int)
 
     fun sentenceStarts(limit: Int): List<ScoredWord> = starts.take(limit.coerceAtLeast(0))
+
+    /** How often [word] appears in chat messages; 0 when unseen. Used to rank corrections. */
+    fun chatCount(word: String): Int = unigrams[word.normalized()] ?: 0
 
     /**
      * Candidates after [previousWords] (oldest first). Standard back-off: every trigram candidate
@@ -52,6 +56,7 @@ class ChatNgramModel private constructor(
 
         fun load(input: InputStream): ChatNgramModel {
             var starts: List<ScoredWord> = emptyList()
+            val unigrams = HashMap<String, Int>()
             val bigrams = HashMap<String, List<ScoredWord>>()
             val trigrams = HashMap<String, List<ScoredWord>>()
             maybeGunzip(input).bufferedReader(Charsets.UTF_8).useLines { lines ->
@@ -60,12 +65,13 @@ class ChatNgramModel private constructor(
                     val columns = line.split('\t')
                     when (columns[0]) {
                         "S" -> if (columns.size >= 2) starts = parseCandidates(columns[1])
+                        "U" -> if (columns.size >= 2) parseCandidates(columns[1]).forEach { unigrams[it.word] = it.count }
                         "B" -> if (columns.size >= 3) bigrams[columns[1].normalized()] = parseCandidates(columns[2])
                         "T" -> if (columns.size >= 3) trigrams[columns[1].normalized()] = parseCandidates(columns[2])
                     }
                 }
             }
-            return ChatNgramModel(starts, bigrams, trigrams)
+            return ChatNgramModel(starts, unigrams, bigrams, trigrams)
         }
 
         private fun parseCandidates(column: String): List<ScoredWord> = column.split('|').mapNotNull { item ->

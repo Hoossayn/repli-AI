@@ -6,6 +6,9 @@ import java.util.zip.GZIPInputStream
 
 data class LexiconWord(val word: String, val frequency: Int)
 
+/** A fuzzy match: [cost] is the weighted edit distance (see [KeyboardProximity]). */
+data class FuzzyCorrection(val word: String, val frequency: Int, val cost: Double)
+
 /** Read-only language data used by the keyboard. Implementations must stay fully offline. */
 interface KeyboardLexicon {
     fun completions(prefix: String, limit: Int): List<LexiconWord>
@@ -13,6 +16,9 @@ interface KeyboardLexicon {
     fun nextWords(previousWord: String, limit: Int): List<LexiconWord>
     fun contains(word: String): Boolean
     fun frequency(word: String): Int = 0
+
+    /** Two-edit, keyboard-aware candidates for words the one-edit index cannot fix. */
+    fun fuzzyCorrections(word: String, limit: Int): List<FuzzyCorrection> = emptyList()
 }
 
 /**
@@ -43,7 +49,7 @@ class BundledKeyboardLexicon private constructor(
 
     override fun corrections(word: String, limit: Int): List<LexiconWord> {
         val query = word.normalized()
-        if (query.length !in MIN_CORRECTION_LENGTH..MAX_CORRECTION_LENGTH || limit <= 0 || query in words) {
+        if (query.length !in MIN_CORRECTION_LENGTH..MAX_CORRECTION_LENGTH || limit <= 0 || contains(query)) {
             return emptyList()
         }
         val candidates = LinkedHashSet<Entry>()
@@ -62,7 +68,7 @@ class BundledKeyboardLexicon private constructor(
             words[swapped]?.let(candidates::add)
         }
         return candidates.asSequence()
-            .filter { oneEditApart(query, it.normalized) }
+            .filter { !it.completionOnly && oneEditApart(query, it.normalized) }
             .sortedWith(
                 compareBy<Entry> { if (isMissingApostrophe(query, it.normalized)) 0 else 1 }
                     .thenByDescending { it.frequency }
@@ -86,7 +92,32 @@ class BundledKeyboardLexicon private constructor(
             .toList()
     }
 
-    override fun contains(word: String): Boolean = word.normalized() in words
+    override fun contains(word: String): Boolean = words[word.normalized()]?.let { !it.completionOnly } == true
+
+    /**
+     * Scans dictionary words that share the first letter and are within one character of the
+     * typed length, scoring them with the weighted keyboard distance. Only run on a separator
+     * for words of five letters or more; the scan is a few thousand short DP tables at most.
+     */
+    override fun fuzzyCorrections(word: String, limit: Int): List<FuzzyCorrection> {
+        val query = word.normalized()
+        if (query.length < MIN_FUZZY_LENGTH || query.length > MAX_CORRECTION_LENGTH || limit <= 0) return emptyList()
+        val first = query.first()
+        val best = ArrayList<FuzzyCorrection>()
+        var index = lowerBound(first.toString())
+        while (index < entries.size) {
+            val entry = entries[index++]
+            if (entry.normalized.firstOrNull() != first) break
+            if (entry.completionOnly || entry.frequency < CORRECTION_FREQUENCY_FLOOR) continue
+            if (kotlin.math.abs(entry.normalized.length - query.length) > 1) continue
+            if (entry.normalized == query) continue
+            val cost = KeyboardProximity.distance(query, entry.normalized, MAX_FUZZY_COST)
+            if (cost > MAX_FUZZY_COST) continue
+            best.add(FuzzyCorrection(entry.word, entry.frequency, cost))
+        }
+        return best.sortedWith(compareBy<FuzzyCorrection> { it.cost }.thenByDescending { it.frequency }.thenBy { it.word.length })
+            .take(limit)
+    }
 
     override fun frequency(word: String): Int = words[word.normalized()]?.frequency ?: 0
 
@@ -113,6 +144,8 @@ class BundledKeyboardLexicon private constructor(
         val normalized: String,
         val frequency: Int,
         val next: List<Pair<String, Int>>,
+        /** Offered as a completion but never treated as a known word for autocorrect purposes. */
+        val completionOnly: Boolean = false,
     ) {
         fun asLexiconWord() = LexiconWord(word, frequency)
     }
@@ -121,6 +154,8 @@ class BundledKeyboardLexicon private constructor(
         private const val MIN_CORRECTION_LENGTH = 3
         private const val MAX_CORRECTION_LENGTH = 20
         private const val CORRECTION_FREQUENCY_FLOOR = 100
+        private const val MIN_FUZZY_LENGTH = 5
+        const val MAX_FUZZY_COST = 1.6
 
         /** Default frequency for supplement words: valid and completable, but below the correction floor. */
         const val SUPPLEMENT_FREQUENCY = 90
@@ -128,6 +163,8 @@ class BundledKeyboardLexicon private constructor(
         /**
          * Loads the main dictionary plus optional supplement word lists (one word per line, optional
          * tab-separated frequency). A supplement never overrides a word the main dictionary already has.
+         * A supplement whose header contains `completion-only` adds words that complete but do not
+         * count as known for autocorrect, so an English typo that happens to spell one is still fixed.
          */
         fun load(input: InputStream, supplements: List<InputStream> = emptyList()): BundledKeyboardLexicon {
             val main = maybeGunzip(input).bufferedReader(Charsets.UTF_8).useLines { lines ->
@@ -136,10 +173,14 @@ class BundledKeyboardLexicon private constructor(
             val known = main.mapTo(HashSet(), Entry::normalized)
             val extra = supplements.flatMap { supplement ->
                 maybeGunzip(supplement).bufferedReader(Charsets.UTF_8).useLines { lines ->
-                    lines.filterNot { it.startsWith('#') || it.isBlank() }
-                        .mapNotNull(::parseSupplementEntry)
-                        .filter { known.add(it.normalized) }
-                        .toList()
+                    var completionOnly = false
+                    lines.mapNotNull { line ->
+                        if (line.startsWith('#')) {
+                            if (line.contains("completion-only", ignoreCase = true)) completionOnly = true
+                            null
+                        } else if (line.isBlank()) null
+                        else parseSupplementEntry(line, completionOnly)
+                    }.filter { known.add(it.normalized) }.toList()
                 }
             }
             val entries = (main + extra).sortedBy(Entry::normalized)
@@ -186,12 +227,12 @@ class BundledKeyboardLexicon private constructor(
 
         private val FILLER_NEXT = listOf("the" to 1, "to" to 2, "of" to 3)
 
-        private fun parseSupplementEntry(line: String): Entry? {
+        private fun parseSupplementEntry(line: String, completionOnly: Boolean): Entry? {
             val columns = line.trim().split('\t', limit = 2)
             val word = columns[0].trim()
             if (word.isEmpty() || word.any { !(it.isLetter() || it == '\'' || it == '’') }) return null
             val frequency = columns.getOrNull(1)?.trim()?.toIntOrNull() ?: SUPPLEMENT_FREQUENCY
-            return Entry(word, word.normalized(), frequency, emptyList())
+            return Entry(word, word.normalized(), frequency, emptyList(), completionOnly)
         }
 
         private fun deletions(word: String): List<String> = word.indices.map { index -> word.removeRange(index, index + 1) }
