@@ -9,7 +9,39 @@ import kotlin.test.assertTrue
 class WordPredictionEngineTest {
     private val engine = WordPredictionEngine().apply {
         val dictionary = File("src/main/assets/ime/dict/repli-en_us.dict")
-        dictionary.inputStream().use { installLexicon(BundledKeyboardLexicon.load(it)) }
+        val supplement = File("src/main/assets/ime/dict/repli-en_ng.supplement")
+        dictionary.inputStream().use { main ->
+            supplement.inputStream().use { extra -> installLexicon(BundledKeyboardLexicon.load(main, listOf(extra))) }
+        }
+    }
+
+    @Test
+    fun `never autocorrects Nigerian names, places or Pidgin from the supplement`() {
+        assertNull(engine.autocorrection(TypingContext("Tunde", "", 5, 5)))
+        assertNull(engine.autocorrection(TypingContext("Ola", "", 3, 3)))
+        assertNull(engine.autocorrection(TypingContext("ola", "", 3, 3)))
+        assertNull(engine.autocorrection(TypingContext("Lagos", "", 5, 5)))
+        assertNull(engine.autocorrection(TypingContext("wahala", "", 6, 6)))
+        assertNull(engine.autocorrection(TypingContext("jollof", "", 6, 6)))
+        assertTrue(engine.suggest(TypingContext("Tund", "", 4, 4)).any { it.word == "Tunde" })
+    }
+
+    @Test
+    fun `treats a capitalised word after a sentence start as a name`() {
+        assertNull(engine.autocorrection(TypingContext("Hi Zoya", "", 7, 7)))
+        assertNull(engine.autocorrection(TypingContext("Hi Teh", "", 6, 6)))
+        assertEquals("The", engine.autocorrection(TypingContext("Teh", "", 3, 3))?.word)
+        assertEquals("The", engine.autocorrection(TypingContext("Ok. Teh", "", 7, 7))?.word)
+        assertEquals("the", engine.autocorrection(TypingContext("Hi teh", "", 6, 6))?.word)
+        assertEquals("THE", engine.autocorrection(TypingContext("Hi TEH", "", 6, 6))?.word)
+    }
+
+    @Test
+    fun `stops correcting a word once the user has undone that correction`() {
+        assertEquals("the", engine.autocorrection(TypingContext("teh", "", 3, 3))?.word)
+        engine.rejectCorrection("teh")
+        assertNull(engine.autocorrection(TypingContext("teh", "", 3, 3)))
+        assertNull(engine.autocorrection(TypingContext("Teh", "", 3, 3)))
     }
 
     @Test

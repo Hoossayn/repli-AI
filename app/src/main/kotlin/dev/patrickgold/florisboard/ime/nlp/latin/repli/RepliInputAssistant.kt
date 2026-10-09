@@ -27,7 +27,14 @@ class RepliInputAssistant(context: Context, private val onReady: () -> Unit) {
         engine.setAdaptiveEnabled(preferences.enabled)
         scope.launch {
             runCatching {
-                appContext.assets.open("ime/dict/repli-en_us.dict").use(BundledKeyboardLexicon::load)
+                appContext.assets.open("ime/dict/repli-en_us.dict").use { main ->
+                    val supplement = runCatching { appContext.assets.open("ime/dict/repli-en_ng.supplement") }.getOrNull()
+                    try {
+                        BundledKeyboardLexicon.load(main, listOfNotNull(supplement))
+                    } finally {
+                        supplement?.close()
+                    }
+                }
             }.onSuccess(engine::installLexicon)
             val loaded = fileMutex.withLock { repository.load() }
             if (initialRevision == preferences.revision) {
@@ -48,6 +55,15 @@ class RepliInputAssistant(context: Context, private val onReady: () -> Unit) {
 
     fun autocorrection(context: TypingContext, privateSession: Boolean = false): WordPrediction? =
         engine.autocorrection(context, includeAdaptive = !privateSession)
+
+    /**
+     * The user undid an autocorrection. The word is never corrected again this session, and when
+     * learning is on (and the field is not private) it is learned so the choice persists.
+     */
+    fun rejectCorrection(contextBeforeWord: String, originalWord: String, privateSession: Boolean = false) {
+        engine.rejectCorrection(originalWord)
+        if (!privateSession) learn(contextBeforeWord, originalWord)
+    }
 
     fun learn(contextBeforeWord: String, committedWord: String) {
         if (!ready || !preferences.enabled) return

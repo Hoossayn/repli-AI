@@ -27,6 +27,10 @@ class WordPredictionEngine {
     @Volatile private var lexicon: KeyboardLexicon? = null
     @Volatile private var adaptiveModel: AdaptiveLanguageModel? = null
     @Volatile private var adaptiveEnabled = true
+    /** Corrections the user undid this session. Bounded, in memory only, never persisted. */
+    private val rejectedCorrections = object : LinkedHashMap<String, Boolean>(32, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Boolean>?): Boolean = size > MAX_REJECTED
+    }
 
     fun installLexicon(loaded: KeyboardLexicon) {
         lexicon = loaded
@@ -39,6 +43,16 @@ class WordPredictionEngine {
     fun setAdaptiveEnabled(enabled: Boolean) {
         adaptiveEnabled = enabled
     }
+
+    /** Remember that the user restored [originalWord] after an autocorrection, so it is not corrected again. */
+    fun rejectCorrection(originalWord: String) {
+        val normalized = originalWord.lowercase(Locale.ROOT).replace('’', '\'')
+        if (normalized.isEmpty()) return
+        synchronized(rejectedCorrections) { rejectedCorrections[normalized] = true }
+    }
+
+    fun isRejectedCorrection(word: String): Boolean =
+        synchronized(rejectedCorrections) { word.lowercase(Locale.ROOT).replace('’', '\'') in rejectedCorrections }
 
     fun suggest(context: TypingContext, limit: Int? = null, includeAdaptive: Boolean = true): List<WordPrediction> {
         if (context.selectionStart < 0 || context.selectionStart != context.selectionEnd) return emptyList()
@@ -130,6 +144,10 @@ class WordPredictionEngine {
         val normalized = prefix.lowercase(Locale.ROOT).replace('’', '\'')
         // Common Nigerian Pidgin words should never be "fixed" into a different English word.
         if (normalized in PROTECTED_DIALECT_WORDS) return null
+        // The user already undid this correction once; respect that for the rest of the session.
+        if (isRejectedCorrection(normalized)) return null
+        // A capitalised word that does not start a sentence is most likely a name (Tunde, Ola, Lagos).
+        if (looksLikeProperNoun(prefix, context.before.dropLast(prefix.length))) return null
         // Repli prefers the contraction in chat; immediate Backspace can restore the possessive.
         if (normalized == "its") {
             return WordPrediction(preserveCase("it's", prefix, false), prefix.length, 0, space = false, correction = true)
@@ -154,6 +172,13 @@ class WordPredictionEngine {
         return WordPrediction(display, prefix.length, 0, space = false, correction = true)
     }
 
+    private fun looksLikeProperNoun(prefix: String, beforeWord: String): Boolean {
+        if (prefix.length < 2 || !prefix.first().isUpperCase() || !prefix.drop(1).all { it.isLowerCase() || it == '\'' || it == '’' }) return false
+        val trimmed = beforeWord.trimEnd()
+        val sentenceStart = trimmed.isEmpty() || trimmed.last() in SENTENCE_END || beforeWord.endsWith('\n')
+        return !sentenceStart
+    }
+
     private fun preserveCase(word: String, prefix: String, sentenceStart: Boolean): String = when {
         prefix.length > 1 && prefix.filter(Char::isLetter).all(Char::isUpperCase) -> word.uppercase(Locale.ROOT)
         prefix.firstOrNull()?.isUpperCase() == true || (prefix.isEmpty() && sentenceStart) -> word.replaceFirstChar(Char::uppercaseChar)
@@ -165,6 +190,8 @@ class WordPredictionEngine {
         const val BEFORE_LIMIT = 96
         const val AFTER_LIMIT = 48
         private const val CONFIDENT_FREQUENCY = 110
+        private const val MAX_REJECTED = 256
+        private val SENTENCE_END = setOf('.', '!', '?', ':', '"', '“', '(', '[', '-', '—', '–')
         private fun wordCharacter(c: Char) = c.isLetter() || c == '\'' || c == '’'
         fun isProtectedDialectWord(word: String): Boolean =
             word.lowercase(Locale.ROOT).replace('’', '\'') in PROTECTED_DIALECT_WORDS

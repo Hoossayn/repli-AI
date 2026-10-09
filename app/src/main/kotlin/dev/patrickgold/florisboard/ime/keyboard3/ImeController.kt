@@ -613,6 +613,12 @@ class ImeController(
                 val start = undo.cursor - undo.correctedText.length
                 val selection = K3TextRange(start + undo.originalWord.length, start + undo.originalWord.length)
                 state.editor.replaceText(start until undo.cursor, undo.originalWord, selection, null)
+                // Restoring the word is a rejection: stop correcting it instead of re-applying on the next space.
+                repliAssistant?.rejectCorrection(
+                    state.content.surroundingText.textBefore.dropLast(undo.correctedText.length),
+                    undo.originalWord,
+                    privateSession = state.flags.isIncognitoMode,
+                )
                 resetContent(selection, state.editor.getSurroundingText(WordPredictionEngine.BEFORE_LIMIT, WordPredictionEngine.AFTER_LIMIT))
                 expectedContentQueue.push(state.content)
                 refreshRepliSuggestions(state)

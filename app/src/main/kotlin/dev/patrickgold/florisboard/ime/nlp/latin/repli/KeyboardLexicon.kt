@@ -122,10 +122,27 @@ class BundledKeyboardLexicon private constructor(
         private const val MAX_CORRECTION_LENGTH = 20
         private const val CORRECTION_FREQUENCY_FLOOR = 100
 
-        fun load(input: InputStream): BundledKeyboardLexicon {
-            val entries = maybeGunzip(input).bufferedReader(Charsets.UTF_8).useLines { lines ->
+        /** Default frequency for supplement words: valid and completable, but below the correction floor. */
+        const val SUPPLEMENT_FREQUENCY = 90
+
+        /**
+         * Loads the main dictionary plus optional supplement word lists (one word per line, optional
+         * tab-separated frequency). A supplement never overrides a word the main dictionary already has.
+         */
+        fun load(input: InputStream, supplements: List<InputStream> = emptyList()): BundledKeyboardLexicon {
+            val main = maybeGunzip(input).bufferedReader(Charsets.UTF_8).useLines { lines ->
                 lines.filterNot { it.startsWith('#') || it.isBlank() }.mapNotNull(::parseEntry).toList()
-            }.sortedBy(Entry::normalized)
+            }
+            val known = main.mapTo(HashSet(), Entry::normalized)
+            val extra = supplements.flatMap { supplement ->
+                maybeGunzip(supplement).bufferedReader(Charsets.UTF_8).useLines { lines ->
+                    lines.filterNot { it.startsWith('#') || it.isBlank() }
+                        .mapNotNull(::parseSupplementEntry)
+                        .filter { known.add(it.normalized) }
+                        .toList()
+                }
+            }
+            val entries = (main + extra).sortedBy(Entry::normalized)
             val words = entries.associateBy(Entry::normalized)
             val mutableDeleteIndex = HashMap<String, MutableList<Entry>>()
             entries.asSequence()
@@ -164,6 +181,14 @@ class BundledKeyboardLexicon private constructor(
                     (item.substring(separator + 1).toIntOrNull() ?: return@mapNotNull null)
             }
             return Entry(word, word.normalized(), frequency, next)
+        }
+
+        private fun parseSupplementEntry(line: String): Entry? {
+            val columns = line.trim().split('\t', limit = 2)
+            val word = columns[0].trim()
+            if (word.isEmpty() || word.any { !(it.isLetter() || it == '\'' || it == '’') }) return null
+            val frequency = columns.getOrNull(1)?.trim()?.toIntOrNull() ?: SUPPLEMENT_FREQUENCY
+            return Entry(word, word.normalized(), frequency, emptyList())
         }
 
         private fun deletions(word: String): List<String> = word.indices.map { index -> word.removeRange(index, index + 1) }
