@@ -64,14 +64,39 @@ object NlpInlineAutofill {
         }
 
         scope.launch {
-            val size = Size(ViewGroup.LayoutParams.WRAP_CONTENT, suggestionsChipHeightPx)
+            val chipHeightPx = suggestionsChipHeightPx
             val latch = CountDownLatch(rawSuggestions.size)
             val suggestionsArray = Array<NlpInlineAutofillSuggestion?>(rawSuggestions.size) { null }
 
             flogInfo { "showInlineSuggestions: [${sequenceId}] start inflating suggestions" }
             for ((index, rawSuggestion) in rawSuggestions.withIndex()) {
-                rawSuggestion.inflate(context, size, context.mainExecutor) { view ->
-                    suggestionsArray[index] = NlpInlineAutofillSuggestion(rawSuggestion.info, view)
+                // Newer Android releases reject a size that mixes WRAP_CONTENT with a fixed
+                // dimension, and the chip height is 0 until the smartbar has been measured
+                // (the keyboard was not visible yet). Ask for a size the provider's spec allows,
+                // fall back to fully wrapped content, and never let one bad spec crash the IME.
+                val sizes = buildList {
+                    if (chipHeightPx > 0) {
+                        val spec = rawSuggestion.info.inlinePresentationSpec
+                        val height = chipHeightPx.coerceIn(spec.minSize.height, spec.maxSize.height)
+                        val width = spec.maxSize.width.coerceIn(spec.minSize.width, Int.MAX_VALUE)
+                        add(Size(width, height))
+                    }
+                    add(Size(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+                }
+                val started = sizes.any { size ->
+                    try {
+                        rawSuggestion.inflate(context, size, context.mainExecutor) { view ->
+                            suggestionsArray[index] = NlpInlineAutofillSuggestion(rawSuggestion.info, view)
+                            latch.countDown()
+                        }
+                        true
+                    } catch (error: IllegalArgumentException) {
+                        flogWarning { "showInlineSuggestions: [${sequenceId}] size $size rejected: ${error.message}" }
+                        false
+                    }
+                }
+                if (!started) {
+                    flogWarning { "showInlineSuggestions: [${sequenceId}] skipping suggestion $index, no accepted size" }
                     latch.countDown()
                 }
             }
