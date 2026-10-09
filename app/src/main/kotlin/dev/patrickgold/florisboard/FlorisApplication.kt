@@ -44,6 +44,7 @@ import dev.patrickgold.florisboard.lib.devtools.Flog
 import dev.patrickgold.florisboard.lib.devtools.LogTopic
 import dev.patrickgold.florisboard.lib.devtools.flogError
 import dev.patrickgold.florisboard.repli.account.RepliFirebaseAccountManager
+import dev.patrickgold.florisboard.repli.diagnostics.RepliCrashReporting
 import dev.patrickgold.jetpref.datastore.runtime.initAndroid
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -146,6 +147,8 @@ class FlorisApplication : Application() {
         clipboardManager.value.initializeForContext(this)
         DictionaryManager.init(this)
         RepliFirebaseAccountManager.initialize(this)
+        // After CrashUtility so Crashlytics chains to FlorisBoard's own crash handler.
+        RepliCrashReporting.initialize(this)
     }
 
     private fun Configuration.determineSystemThemeMode(): SystemThemeMode {

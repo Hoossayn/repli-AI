@@ -36,6 +36,8 @@ import dev.patrickgold.florisboard.repli.capture.ReplyAutoScrollAccessibilitySer
 import dev.patrickgold.florisboard.repli.data.AutoScrollPreferences
 import dev.patrickgold.florisboard.repli.data.RecentMessageRepository
 import dev.patrickgold.florisboard.repli.data.RemoteGenerationPreferences
+import dev.patrickgold.florisboard.repli.diagnostics.CrashReportingPreferences
+import dev.patrickgold.florisboard.repli.diagnostics.RepliCrashReporting
 
 @Composable
 fun RepliSettingsScreen() {
@@ -48,6 +50,7 @@ fun RepliSettingsScreen() {
     var cloudEnabled by remember { mutableStateOf(remote.enabled) }
     var guideEnabled by remember { mutableStateOf(capture.enabled) }
     var learningEnabled by remember { mutableStateOf(learning.enabled) }
+    var crashReportsEnabled by remember { mutableStateOf(CrashReportingPreferences(context).enabled) }
     var notificationEnabled by remember { mutableStateOf(hasNotificationAccess(context)) }
     var accessibilityEnabled by remember { mutableStateOf(hasCaptureAccessibility(context)) }
     var cloudDisclosure by remember { mutableStateOf(false) }
@@ -208,6 +211,21 @@ fun RepliSettingsScreen() {
                 14, RepliStyle.muted)
             Spacer(Modifier.height(14.dp))
             RepliAction("Privacy & FAQ", { privacyFaq = true }, filled = false)
+        }
+
+        Spacer(Modifier.height(16.dp))
+        RepliCard {
+            RepliLabel("Crash reports", 17, RepliStyle.ink, bold = true)
+            Spacer(Modifier.height(8.dp))
+            RepliLabel("If the keyboard crashes, an anonymous report with the error, device model and app version helps us fix it. Typed text, chats, suggestions and your account are never included.",
+                14, RepliStyle.muted)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(checked = crashReportsEnabled, onCheckedChange = {
+                    crashReportsEnabled = it
+                    RepliCrashReporting.setEnabled(context, it)
+                })
+                RepliLabel("Send anonymous crash reports", 14, RepliStyle.ink)
+            }
         }
     }
 

@@ -27,3 +27,7 @@
 
 # @Serializable and @Polymorphic are used at runtime for polymorphic serialization.
 -keepattributes RuntimeVisibleAnnotations,AnnotationDefault
+
+# Crashlytics: keep file names and line numbers so crash stacks are readable; upload the
+# release mapping file to Firebase so obfuscated frames are symbolicated.
+-keepattributes SourceFile,LineNumberTable
