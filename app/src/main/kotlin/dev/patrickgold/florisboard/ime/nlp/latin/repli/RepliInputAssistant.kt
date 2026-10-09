@@ -36,6 +36,9 @@ class RepliInputAssistant(context: Context, private val onReady: () -> Unit) {
                     }
                 }
             }.onSuccess(engine::installLexicon)
+            runCatching {
+                appContext.assets.open("ime/dict/repli-en_chat.ngrams").use(ChatNgramModel::load)
+            }.onSuccess(engine::installChatModel)
             val loaded = fileMutex.withLock { repository.load() }
             if (initialRevision == preferences.revision) {
                 model = loaded

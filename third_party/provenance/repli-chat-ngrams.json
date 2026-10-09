@@ -1,0 +1,13 @@
+{
+  "artifact": "app/src/main/assets/ime/dict/repli-en_chat.ngrams",
+  "sha256": "c469aebef2ad575261856b0abb3f0f2dc7902f5582255cdd4c12220d7c9c7950",
+  "source": "https://github.com/google-research-datasets/Synthetic-Persona-Chat",
+  "revision": "1f367a0f05d388ca96ebbbc9e5752ab19ac76510",
+  "title": "Synthetic-Persona-Chat (SPC)",
+  "authors": "Pegah Jandaghi, XiangHai Sheng, Xinyi Bai, Jay Pujara, Hakim Sidahmed (Google)",
+  "license": "CC-BY-4.0",
+  "license_text": "third_party/licenses/CC-BY-4.0.txt",
+  "built_with": "utils/build_chat_ngrams.py (all four CSV files; --bigram-min 3 --trigram-min 4 --top 5)",
+  "contents": "Aggregate counts only: message-opening words, and the top next words after one or two words (490,990 messages). No conversation text is shipped.",
+  "note": "The corpus is LLM-generated casual English chit-chat, so it is a neutral prior; the user's own adaptive model always outranks it and hand-written Pidgin hints fill contexts it does not cover."
+}

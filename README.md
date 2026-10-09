@@ -4,7 +4,7 @@ Repli Keyboard is an Android keyboard built from [FlorisBoard](https://github.co
 
 ## What works
 
-- Word completions and next-word suggestions in eligible English text fields.
+- Word completions and next-word suggestions in eligible English text fields. Next words come, in order of trust, from your own adaptive model, a chat-corpus n-gram prior (trigram over bigram), Repli's phrase hints, and the dictionary; message openers come from the corpus.
 - Candidate-tap replacement and autocorrect when a space is pressed.
 - A bounded adaptive model for committed words and short phrases. It is encrypted with Android Keystore and stored in the app's no-backup directory.
 - A **Typing → Adaptive learning** setting to stop learning or clear saved words. Password, email address, URL, no-suggestions, and incognito fields are excluded.
@@ -39,4 +39,4 @@ The debug build uses the application ID `com.replyai.repli.keyboard.debug`. On a
 
 Read the [Repli Keyboard privacy note](docs/repli-privacy.md). The original FlorisBoard README is kept as [upstream documentation](UPSTREAM_README.md); its store and download links refer to FlorisBoard, not Repli Keyboard.
 
-FlorisBoard source is Apache-2.0 licensed. The bundled English dictionary is GPL-3.0 licensed; its source revision and hashes are in [dictionary provenance](third_party/provenance/repli-dictionary.json). The dictionary's license text is included in the app assets.
+FlorisBoard source is Apache-2.0 licensed. Next-word suggestions use a bundled n-gram prior built from Google's Synthetic-Persona-Chat corpus (CC BY 4.0; aggregate counts only, see [provenance](third_party/provenance/repli-chat-ngrams.json) and `utils/build_chat_ngrams.py`). The bundled English dictionary is GPL-3.0 licensed; its source revision and hashes are in [dictionary provenance](third_party/provenance/repli-dictionary.json). The dictionary's license text is included in the app assets.

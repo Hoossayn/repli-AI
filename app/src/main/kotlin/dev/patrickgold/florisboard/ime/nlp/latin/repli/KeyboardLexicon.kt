@@ -180,8 +180,11 @@ class BundledKeyboardLexicon private constructor(
                 if (separator <= 0) null else item.substring(0, separator) to
                     (item.substring(separator + 1).toIntOrNull() ?: return@mapNotNull null)
             }
-            return Entry(word, word.normalized(), frequency, next)
+            // 40% of the shipped rows carry a placeholder next-word column; it carries no signal.
+            return Entry(word, word.normalized(), frequency, if (next == FILLER_NEXT) emptyList() else next)
         }
+
+        private val FILLER_NEXT = listOf("the" to 1, "to" to 2, "of" to 3)
 
         private fun parseSupplementEntry(line: String): Entry? {
             val columns = line.trim().split('\t', limit = 2)

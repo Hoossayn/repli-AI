@@ -26,6 +26,7 @@ data class WordPrediction(
 class WordPredictionEngine {
     @Volatile private var lexicon: KeyboardLexicon? = null
     @Volatile private var adaptiveModel: AdaptiveLanguageModel? = null
+    @Volatile private var chatModel: ChatNgramModel? = null
     @Volatile private var adaptiveEnabled = true
     /** Corrections the user undid this session. Bounded, in memory only, never persisted. */
     private val rejectedCorrections = object : LinkedHashMap<String, Boolean>(32, 0.75f, true) {
@@ -38,6 +39,10 @@ class WordPredictionEngine {
 
     fun installAdaptiveModel(model: AdaptiveLanguageModel) {
         adaptiveModel = model
+    }
+
+    fun installChatModel(model: ChatNgramModel) {
+        chatModel = model
     }
 
     fun setAdaptiveEnabled(enabled: Boolean) {
@@ -101,14 +106,13 @@ class WordPredictionEngine {
                     }
                 }
             }
-        } else if (sentenceStart) listOf("hello", "i", "thanks")
-        else {
-            val phraseWords = phrases[tokens.joinToString(" ")] ?: phrases[tokens.lastOrNull()]
-            val adaptiveWords = adaptiveModel.takeIf { adaptiveEnabled && includeAdaptive }?.nextWords(tokens, 3).orEmpty()
-            (adaptiveWords + phraseWords.orEmpty() +
-                lexicon?.nextWords(tokens.lastOrNull().orEmpty(), 3).orEmpty().map(LexiconWord::word) +
-                listOf("the", "and", "to"))
-                .distinctBy { it.lowercase(Locale.ROOT) }
+        } else if (sentenceStart) {
+            // Corpus message openers, one per word family (i / i'm / i've count once), then the old defaults.
+            val openers = chatModel?.sentenceStarts(12).orEmpty().map(ChatNgramModel.ScoredWord::word)
+                .distinctBy { it.substringBefore('\'') }
+            (openers + listOf("hello", "i", "thanks")).distinct()
+        } else {
+            nextWordCandidates(tokens, includeAdaptive)
         }
         val tail = after.drop(suffix.length)
         val space = tail.isEmpty() || tail.startsWith(' ')
@@ -130,6 +134,30 @@ class WordPredictionEngine {
         }.filter { prediction ->
             limit == null || context.textLength?.let { it - prediction.removeBefore - prediction.removeAfter + prediction.replacement.length <= limit } != false
         }.take(3)
+    }
+
+    /**
+     * Next-word candidates merged by score. Tiers, highest first: the user's own adaptive model,
+     * the chat corpus prior (trigram over bigram, by count), Repli's hand-written phrase hints,
+     * the dictionary's next-word column, and finally generic fillers.
+     */
+    private fun nextWordCandidates(tokens: List<String>, includeAdaptive: Boolean): List<String> {
+        val scores = LinkedHashMap<String, Long>()
+        fun offer(word: String, score: Long) {
+            val key = word.lowercase(Locale.ROOT)
+            if (key.isEmpty()) return
+            scores[key] = maxOf(scores[key] ?: 0L, score)
+        }
+        adaptiveModel.takeIf { adaptiveEnabled && includeAdaptive }?.nextWords(tokens, 3).orEmpty()
+            .forEachIndexed { index, word -> offer(word, ADAPTIVE_TIER - index * 1_000_000L) }
+        chatModel?.nextWords(tokens, 5).orEmpty()
+            .forEach { candidate -> offer(candidate.word, CHAT_TIER + candidate.count) }
+        (phrases[tokens.joinToString(" ")] ?: phrases[tokens.lastOrNull()]).orEmpty()
+            .forEachIndexed { index, word -> offer(word, PHRASE_TIER - index * 100L) }
+        lexicon?.nextWords(tokens.lastOrNull().orEmpty(), 3).orEmpty()
+            .forEachIndexed { index, word -> offer(word.word, LEXICON_TIER - index) }
+        listOf("the", "and", "to").forEachIndexed { index, word -> offer(word, 3L - index) }
+        return scores.entries.sortedByDescending { it.value }.map { it.key }
     }
 
     /** Returns only high-confidence, one-edit corrections suitable for committing on a separator. */
@@ -191,6 +219,10 @@ class WordPredictionEngine {
         const val AFTER_LIMIT = 48
         private const val CONFIDENT_FREQUENCY = 110
         private const val MAX_REJECTED = 256
+        private const val ADAPTIVE_TIER = 1_000_000_000L
+        private const val CHAT_TIER = 10_000_000L
+        private const val PHRASE_TIER = 10_000L
+        private const val LEXICON_TIER = 1_000L
         private val SENTENCE_END = setOf('.', '!', '?', ':', '"', '“', '(', '[', '-', '—', '–')
         private fun wordCharacter(c: Char) = c.isLetter() || c == '\'' || c == '’'
         fun isProtectedDialectWord(word: String): Boolean =
@@ -275,6 +307,11 @@ class WordPredictionEngine {
             "next" to listOf("week", "time", "month"), "tomorrow" to listOf("morning", "evening", "instead"),
             "decline" to listOf("politely", "the", "and"), "politely" to listOf("and", "but", "because"),
             "suggest" to listOf("next", "another", "a"), "keep" to listOf("it", "the", "things"),
+            // Pidgin openers the chat corpus does not cover.
+            "abeg" to listOf("help", "send", "no"), "how far" to listOf("na", "you", "with"),
+            "wetin" to listOf("dey", "you", "happen"), "wahala" to listOf("dey", "no", "be"),
+            "oya" to listOf("come", "let's", "now"), "dey" to listOf("go", "come", "there"),
+            "no" to listOf("wahala", "worries", "problem"), "na" to listOf("so", "you", "true"),
         )
     }
 }
