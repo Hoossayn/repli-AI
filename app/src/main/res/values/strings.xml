@@ -85,6 +85,53 @@
     <string name="repli_voice__timeout">Voice input timed out — try again</string>
     <string name="repli_voice__failed">Voice input failed — try again</string>
     <string name="repli_voice__settings_unavailable">Couldn\'t open speech settings</string>
+
+    <!-- Repli reply flow (orchestrator, guidance and cloud generation status lines) -->
+    <string name="repli_reply__message_changed">This message changed. Read the latest chat to continue.</string>
+    <string name="repli_reply__field_off">Assistance is off for this field</string>
+    <string name="repli_reply__all_views_captured">All four views are captured. Review this context before generating.</string>
+    <string name="repli_reply__capture_disabled_by_admin">Screen capture is disabled for this phone profile by its administrator.</string>
+    <string name="repli_reply__consent_launch_failed">Couldn\'t open screen sharing here. Tap the chat field and try again.</string>
+    <string name="repli_reply__consent_not_opened">Android didn\'t open screen sharing in this phone profile. Tap the chat field to retry.</string>
+    <string name="repli_reply__persona_changed">Persona changed · review before generating</string>
+    <string name="repli_reply__fullscreen_review_failed">Couldn\'t open full-screen review</string>
+    <string name="repli_reply__guidance_too_long">What you want to say is too long (500 characters max)</string>
+    <string name="repli_reply__empty_chat">This looks like a new or empty chat. Send the first message before capturing context.</string>
+    <string name="repli_reply__local_text_ai_unavailable">On-device text · AI reading unavailable. Check messages before cloud generation.</string>
+    <string name="repli_reply__ai_reading">AI is reading this chat image…</string>
+    <string name="repli_reply__ai_found_nothing">AI found no messages · review the on-device text</string>
+    <plurals name="repli_reply__ai_read_views">
+        <item quantity="one">AI read %d captured view · check speakers and text before cloud generation</item>
+        <item quantity="other">AI read %d captured views · check speakers and text before cloud generation</item>
+    </plurals>
+    <string name="repli_reply__ai_unavailable_nothing_found">AI reading was unavailable and on-device reading found no messages. Try a clearer capture.</string>
+    <string name="repli_reply__ai_unavailable_review_local">AI reading unavailable · review the on-device text</string>
+    <string name="repli_reply__captured_chat_changed" comment="%1$s previous chat name, %2$s new chat name">Captured chat changed from %1$s to %2$s. Check the messages before generating.</string>
+    <string name="repli_reply__confirm_save_chip" comment="%s is a shortened contact name">Save %s?</string>
+    <string name="repli_reply__confirm_save_description" comment="%s is the contact name">Confirm this chat is with %s, save its persona, and use its recent message</string>
+    <string name="repli_reply__confirm_use_chip" comment="%s is a shortened contact name">Use %s?</string>
+    <string name="repli_reply__confirm_use_description" comment="%s is the contact name">Confirm this chat is with %s and use its recent message</string>
+    <string name="repli_reply__idle_recent_message">Recent message · confirm before use</string>
+    <string name="repli_reply__idle_ambiguous">Several recent chats · use screen capture</string>
+    <string name="repli_reply__idle_capture_saved_chat">Capture this chat to suggest replies</string>
+    <string name="repli_reply__idle_default">Suggest replies · saving a chat is optional</string>
+    <string name="repli_reply__cloud_not_configured">Cloud replies aren\'t configured in this build.</string>
+    <string name="repli_reply__cloud_disabled">Enable cloud replies in Repli settings to generate.</string>
+    <string name="repli_reply__cloud_sign_in">Sign in to Repli to generate cloud replies.</string>
+    <string name="repli_reply__no_internet">No internet connection. Connect and try again.</string>
+    <string name="repli_reply__preparing">Preparing your Repli ideas…</string>
+    <string name="repli_reply__prepare_failed">Couldn\'t prepare cloud context. Check the reviewed messages and retry.</string>
+    <string name="repli_reply__finding">Finding your Repli ideas…</string>
+    <string name="repli_reply__no_new_replies">No new replies this time · tell Repli what to change or try again</string>
+    <string name="repli_reply__memory_not_saved">Replies ready · couldn\'t save chat memory</string>
+    <plurals name="repli_reply__based_on_history">
+        <item quantity="one">Tap to insert · based on %d earlier message</item>
+        <item quantity="other">Tap to insert · based on %d earlier messages</item>
+    </plurals>
+    <string name="repli_reply__first_reply_for_chat">Tap to insert · first reply for this chat · read the chat once for more context</string>
+    <string name="repli_reply__tap_to_insert">Tap to insert, then edit</string>
+    <string name="repli_reply__cloud_timeout">Cloud timed out. Check your connection and retry.</string>
+    <string name="repli_reply__failure_try_again" comment="%s is a short cloud failure label">%s · try again</string>
     <string name="repli_learn__title">Learn by scrolling</string>
     <string name="repli_learn__profile_title">Who is this conversation with?</string>
     <string name="repli_learn__profile_empty_title">No saved chats yet</string>
