@@ -239,7 +239,6 @@ dependencies {
     implementation(libs.androidx.credentials)
     implementation(libs.androidx.credentials.play.services.auth)
     implementation(libs.googleid)
-    implementation(libs.mlkit.smart.reply)
     implementation(libs.mlkit.text.recognition)
 
     implementation(projects.lib.android)

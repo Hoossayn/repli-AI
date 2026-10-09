@@ -8,14 +8,6 @@ import dev.patrickgold.florisboard.repli.persona.Persona
 import kotlin.math.abs
 import java.util.TimeZone
 
-enum class ReplyOrigin { REMOTE, ON_DEVICE, ON_DEVICE_FALLBACK }
-
-data class ReplyGenerationResult(
-    val replies: List<String>,
-    val explanation: String,
-    val origin: ReplyOrigin,
-)
-
 enum class ReplyIntent(val wireValue: String) { REPLY("reply"), FRESH_START("fresh_start") }
 
 data class SharedReplySituation(

@@ -23,7 +23,6 @@ androidx-credentials = "1.3.0"
 googleid = "1.1.1"
 k3lp = "0.1.0"
 kotlin = "2.4.20"
-mlkit-smart-reply = "17.0.4"
 mlkit-text-recognition = "16.0.1"
 kotlinx-coroutines = "1.11.0"
 kotlinx-io = "0.9.1"
@@ -88,7 +87,6 @@ kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serializa
 material-kolor = { module = "com.materialkolor:material-kolor", version.ref = "material-kolor" }
 mikepenz-aboutlibraries-core = { module = "com.mikepenz:aboutlibraries-core", version.ref = "mikepenz-aboutlibraries" }
 mikepenz-aboutlibraries-compose = { module = "com.mikepenz:aboutlibraries-compose-m3", version.ref = "mikepenz-aboutlibraries" }
-mlkit-smart-reply = { group = "com.google.mlkit", name = "smart-reply", version.ref = "mlkit-smart-reply" }
 mlkit-text-recognition = { group = "com.google.mlkit", name = "text-recognition", version.ref = "mlkit-text-recognition" }
 patrickgold-compose-tooltip = { module = "dev.patrickgold.compose.tooltip:tooltip", version.ref = "patrickgold-compose-tooltip" }
 patrickgold-jetpref-datastore-model = { module = "dev.patrickgold.jetpref:jetpref-datastore-model", version.ref = "patrickgold-jetpref" }
