@@ -48,6 +48,7 @@ import dev.patrickgold.florisboard.repli.suggestions.RepliAccountSessionProvider
 import dev.patrickgold.florisboard.repli.suggestions.ServerMediatedContextEngine
 import dev.patrickgold.florisboard.repli.review.FullScreenContextReviewActivity
 import dev.patrickgold.florisboard.repli.review.FullScreenContextReviewSession
+import dev.patrickgold.florisboard.repli.suggestions.ServerMediatedReplyEngine
 import dev.patrickgold.florisboard.repli.voice.VoiceRecordingState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
