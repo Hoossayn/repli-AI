@@ -197,6 +197,7 @@ enum class CloudReplyFailure(val label: String) {
     INVALID_REQUEST("Cloud request rejected · check the reviewed chats"),
     INVALID_RESPONSE("Cloud returned an incomplete reply"),
     REFUSED("Cloud couldn't suggest safely"),
+    NOT_SUPPORTED("Backend update needed for this feature"),
 }
 
 open class RemoteReplyException(
@@ -212,6 +213,7 @@ internal fun backendFailureReason(response: ReplyBackendResponse): CloudReplyFai
     val json = runCatching { JSONObject(response.body) }.getOrNull()
     return when (response.status) {
         400, 413, 422 -> CloudReplyFailure.INVALID_REQUEST
+        404, 405 -> CloudReplyFailure.NOT_SUPPORTED
         429 -> if (json?.optString("error") == "quota_exceeded") {
             CloudReplyFailure.USAGE_LIMIT
         } else {
