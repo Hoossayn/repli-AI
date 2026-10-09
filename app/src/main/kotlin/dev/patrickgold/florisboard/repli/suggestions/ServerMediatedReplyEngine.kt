@@ -38,7 +38,8 @@ object RepliAccountSessionProvider : RepliBackendSessionProvider {
 }
 
 internal data class ReplyBackendResponse(val status: Int, val body: String)
-data class RemoteReplyBatch(val replies: List<String>, val memorySaved: Boolean?)
+/** [memoryTurns] is how many earlier approved turns the backend could use (null when no saved chat). */
+data class RemoteReplyBatch(val replies: List<String>, val memorySaved: Boolean?, val memoryTurns: Int? = null)
 
 internal fun interface ReplyBackendTransport {
     suspend fun post(endpoint: String, bearerToken: String, body: ByteArray): ReplyBackendResponse
@@ -81,6 +82,7 @@ class ServerMediatedReplyEngine internal constructor(
         val json = runCatching { JSONObject(response.body) }
             .getOrElse { throw RemoteReplyException("Reply backend returned invalid JSON", it) }
         val memorySaved = if (request.profileId != null) json.opt("memory_saved") as? Boolean else null
+        val memoryTurns = if (request.profileId != null) (json.opt("memory_turns") as? Int)?.takeIf { it >= 0 } else null
         val array = json.optJSONArray("candidates")
             ?: throw RemoteReplyException("Reply backend omitted candidates")
         val candidates = List(array.length()) { index ->
@@ -89,7 +91,7 @@ class ServerMediatedReplyEngine internal constructor(
         }
         val replies = runCatching { requireThreeCandidates(candidates) }
             .getOrElse { throw RemoteReplyException(it.message ?: "Invalid reply candidates", it) }
-        return RemoteReplyBatch(replies, memorySaved)
+        return RemoteReplyBatch(replies, memorySaved, memoryTurns)
     }
 
     private fun PreparedRemoteReplyRequest.toJson() = JSONObject().apply {

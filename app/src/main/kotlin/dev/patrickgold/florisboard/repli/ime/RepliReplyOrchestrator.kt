@@ -32,6 +32,8 @@ import dev.patrickgold.florisboard.repli.data.LearnedStyleRepository
 import dev.patrickgold.florisboard.repli.data.ProfileRepository
 import dev.patrickgold.florisboard.repli.data.RecentMessageRepository
 import dev.patrickgold.florisboard.repli.data.RemoteGenerationPreferences
+import dev.patrickgold.florisboard.repli.diagnostics.CaptureTelemetry
+import android.os.SystemClock
 import dev.patrickgold.florisboard.repli.identity.ConfirmedConversationIdentity
 import dev.patrickgold.florisboard.repli.identity.ConversationIdentityResolution
 import dev.patrickgold.florisboard.repli.identity.ConversationIdentityResolver
@@ -158,6 +160,10 @@ class RepliReplyOrchestrator(
         .takeIf(ServerMediatedReplyEngine::isConfigured)
         ?.let { ServerMediatedContextEngine(it, RepliAccountSessionProvider) }
 
+    private val telemetry = CaptureTelemetry(appContext)
+    /** elapsedRealtime of the tap that started the current flow; null once replies are ready. */
+    private var flowStartedAt: Long? = null
+    private var flowIsQuick = false
     private var generation: Job? = null
     private var captureLaunch: Job? = null
     private var readingJob: Job? = null
@@ -331,6 +337,9 @@ class RepliReplyOrchestrator(
                 selectedProfileId = fresh.profile.id
                 suggestion = null
                 confirmedIdentity = null
+                telemetry.count(CaptureTelemetry.QUICK_REPLY)
+                flowStartedAt = SystemClock.elapsedRealtime()
+                flowIsQuick = true
                 val session = ReplyCaptureSession.beginWithContext(
                     target, listOf(ConversationTurn(fresh.message.text, fromMe = false)),
                 )
@@ -397,6 +406,7 @@ class RepliReplyOrchestrator(
 
     fun insertSuggestion(text: String) {
         flogDebug { "RepliReply: insertSuggestion len=${text.length}" }
+        telemetry.count(CaptureTelemetry.REPLY_INSERTED)
         insertText(text)
         // The reply is only a draft. Return to normal typing so it can be edited
         // in the host chat composer before the user decides to send it.
@@ -487,6 +497,11 @@ class RepliReplyOrchestrator(
             return
         }
         val begun = ReplyCaptureSession.begin(target, append, viewport, singleView)
+        telemetry.count(CaptureTelemetry.CAPTURE_STARTED)
+        if (!append) {
+            flowStartedAt = SystemClock.elapsedRealtime()
+            flowIsQuick = false
+        }
         update { it.copy(active = true) }
         try {
             // Start while the IME is still visible. Hiding first can remove Android's
@@ -499,6 +514,7 @@ class RepliReplyOrchestrator(
             hideKeyboard()
         } catch (error: Exception) {
             flogError { "RepliCapture: consent activity launch failed: ${error::class.java.simpleName}" }
+            telemetry.count(CaptureTelemetry.CAPTURE_CONSENT_FAILED)
             ReplyCaptureSession.fail(begun.id, "Couldn't open screen sharing here. Tap the chat field and try again.")
             return
         }
@@ -507,6 +523,7 @@ class RepliReplyOrchestrator(
             val pending = ReplyCaptureSession.state.value
             if (pending?.id == begun.id && pending.phase == ReplyPhase.CONSENT &&
                 !pending.consentActivityOpened) {
+                telemetry.count(CaptureTelemetry.CAPTURE_CONSENT_FAILED)
                 ReplyCaptureSession.fail(begun.id,
                     "Android didn't open screen sharing in this phone profile. Tap the chat field to retry.")
             }
@@ -620,6 +637,7 @@ class RepliReplyOrchestrator(
         if (index !in turns.indices) return
         val updated = turns.toMutableList()
         val removed = updated.removeAt(index)
+        telemetry.count(CaptureTelemetry.TURNS_REMOVED)
         removedReviewTurn = ReplyCaptureSession.state.value?.id?.let { RemovedReviewTurn(it, index, removed) }
         saveReviewTurns(updated)
     }
@@ -1048,6 +1066,8 @@ class RepliReplyOrchestrator(
         if (!canUseVision) {
             val taken = PendingVisionCaptureStore.take(state.id)
             taken?.eraseImages()
+            telemetry.count(CaptureTelemetry.VISION_UNAVAILABLE)
+            telemetry.count(CaptureTelemetry.FRAMES_CAPTURED, taken?.images?.size ?: 0)
             val turns = ReplyConversation.mergeCapture(
                 state.turns, taken?.localTurns.orEmpty(),
             )
@@ -1081,6 +1101,9 @@ class RepliReplyOrchestrator(
                 val usedLocalText = captured.isEmpty()
                 val readTurns = captured.ifEmpty { taken.localTurns }
                 val merged = ReplyConversation.mergeCapture(taken.baseTurns, readTurns)
+                telemetry.count(if (usedLocalText) CaptureTelemetry.VISION_EMPTY else CaptureTelemetry.VISION_READ)
+                telemetry.count(CaptureTelemetry.FRAMES_CAPTURED, taken.images.size)
+                telemetry.count(CaptureTelemetry.TURNS_READ, readTurns.size)
                 withContext(Dispatchers.Main) {
                     if (merged.isEmpty()) {
                         ReviewEvidenceStore.discard(state.id)
@@ -1099,6 +1122,8 @@ class RepliReplyOrchestrator(
                 throw cancellation
             } catch (_: Exception) {
                 ReviewEvidenceStore.discard(state.id)
+                telemetry.count(CaptureTelemetry.VISION_FAILED)
+                telemetry.count(CaptureTelemetry.FRAMES_CAPTURED, taken.images.size)
                 val fallback = ReplyConversation.mergeCapture(taken.baseTurns, taken.localTurns)
                 withContext(Dispatchers.Main) {
                     if (fallback.isEmpty()) {
@@ -1191,6 +1216,12 @@ class RepliReplyOrchestrator(
                     lastApprovedRequest = approved
                     pendingMore = false
                     val combined = (keep + batch.replies).distinct().take(9)
+                    telemetry.count(CaptureTelemetry.GENERATION_OK)
+                    if (!more) {
+                        telemetry.recordReplyLatency(flowStartedAt, flowIsQuick)
+                        flowStartedAt = null
+                    }
+                    val memoryTurns = batch.memoryTurns
                     ReplyCaptureSession.update(state.id) {
                         it.copy(phase = ReplyPhase.READY,
                             replies = combined,
@@ -1198,12 +1229,17 @@ class RepliReplyOrchestrator(
                                 "No new replies this time · tell Repli what to change or try again"
                             } else if (approved.profileId != null && batch.memorySaved != true) {
                                 "Replies ready · couldn't save chat memory"
+                            } else if (memoryTurns != null && memoryTurns > 0) {
+                                "Tap to insert · based on $memoryTurns earlier message${if (memoryTurns == 1) "" else "s"}"
+                            } else if (memoryTurns == 0 && state.frames == 0) {
+                                "Tap to insert · first reply for this chat · read the chat once for more context"
                             } else "Tap to insert, then edit",
                             generationError = null)
                     }
                     flogDebug { "RepliReply: READY cloud replies=${batch.replies.size}" }
                 }
             } catch (timeout: kotlinx.coroutines.TimeoutCancellationException) {
+                telemetry.count(CaptureTelemetry.GENERATION_FAILED)
                 withContext(Dispatchers.Main) {
                     if (ReplyCaptureSession.state.value?.id == state.id) {
                         ReplyCaptureSession.update(state.id) {
@@ -1217,6 +1253,7 @@ class RepliReplyOrchestrator(
                 throw cancellation
             } catch (error: Exception) {
                 flogError { "RepliReply: cloud generation failed: ${error.message}" }
+                telemetry.count(CaptureTelemetry.GENERATION_FAILED)
                 val status = when (error) {
                     is kotlinx.coroutines.TimeoutCancellationException, is SocketTimeoutException -> "Cloud timed out. Check your connection and retry."
                     is IOException -> "No internet connection. Connect and try again."

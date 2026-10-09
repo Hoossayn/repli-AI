@@ -36,6 +36,7 @@ import dev.patrickgold.florisboard.repli.capture.ReplyAutoScrollAccessibilitySer
 import dev.patrickgold.florisboard.repli.data.AutoScrollPreferences
 import dev.patrickgold.florisboard.repli.data.RecentMessageRepository
 import dev.patrickgold.florisboard.repli.data.RemoteGenerationPreferences
+import dev.patrickgold.florisboard.repli.diagnostics.CaptureTelemetry
 import dev.patrickgold.florisboard.repli.diagnostics.CrashReportingPreferences
 import dev.patrickgold.florisboard.repli.diagnostics.RepliCrashReporting
 
@@ -51,6 +52,8 @@ fun RepliSettingsScreen() {
     var guideEnabled by remember { mutableStateOf(capture.enabled) }
     var learningEnabled by remember { mutableStateOf(learning.enabled) }
     var crashReportsEnabled by remember { mutableStateOf(CrashReportingPreferences(context).enabled) }
+    val telemetry = remember(context) { CaptureTelemetry(context) }
+    var diagnostics by remember { mutableStateOf(telemetry.snapshot()) }
     var notificationEnabled by remember { mutableStateOf(hasNotificationAccess(context)) }
     var accessibilityEnabled by remember { mutableStateOf(hasCaptureAccessibility(context)) }
     var cloudDisclosure by remember { mutableStateOf(false) }
@@ -61,6 +64,7 @@ fun RepliSettingsScreen() {
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
+                diagnostics = telemetry.snapshot()
                 notificationEnabled = hasNotificationAccess(context)
                 accessibilityEnabled = hasCaptureAccessibility(context)
                 cloudEnabled = remote.enabled
@@ -226,6 +230,28 @@ fun RepliSettingsScreen() {
                 })
                 RepliLabel("Send anonymous crash reports", 14, RepliStyle.ink)
             }
+        }
+
+        Spacer(Modifier.height(16.dp))
+        RepliCard {
+            RepliLabel("Diagnostics", 17, RepliStyle.ink, bold = true)
+            Spacer(Modifier.height(8.dp))
+            RepliLabel("Counts only, kept on this phone, never uploaded. Useful when a capture or reply does not work as expected.", 14, RepliStyle.muted)
+            Spacer(Modifier.height(10.dp))
+            RepliLabel(
+                "Captures started ${diagnostics.capturesStarted} · screen-share not opened ${diagnostics.captureConsentFailed} · frames ${diagnostics.framesCaptured}\n" +
+                    "AI read ${diagnostics.visionRead} · AI found nothing ${diagnostics.visionEmpty} · AI failed ${diagnostics.visionFailed} · AI unavailable ${diagnostics.visionUnavailable}\n" +
+                    "Messages read ${diagnostics.turnsRead} · speaker fixes ${diagnostics.speakerCorrections} · messages removed ${diagnostics.turnsRemoved}\n" +
+                    "Replies generated ${diagnostics.generationsSucceeded} · failed ${diagnostics.generationsFailed} · inserted ${diagnostics.repliesInserted}\n" +
+                    "Quick replies ${diagnostics.quickReplies} · avg ${diagnostics.quickReplyMsAverage / 1000}s (last ${diagnostics.quickReplyMsLast / 1000}s)\n" +
+                    "Captured replies ${diagnostics.captureReplyCount} · avg ${diagnostics.captureReplyMsAverage / 1000}s (last ${diagnostics.captureReplyMsLast / 1000}s)",
+                13, RepliStyle.muted,
+            )
+            Spacer(Modifier.height(10.dp))
+            RepliAction("Reset counters", {
+                telemetry.reset()
+                diagnostics = telemetry.snapshot()
+            }, filled = false)
         }
     }
 

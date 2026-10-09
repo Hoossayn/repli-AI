@@ -34,6 +34,7 @@ import dev.patrickgold.florisboard.repli.capture.TurnSource
 import dev.patrickgold.florisboard.repli.suggestions.PreparedRemoteReplyRequest
 import dev.patrickgold.florisboard.repli.suggestions.RemoteReplyPrivacyPolicy
 import dev.patrickgold.florisboard.repli.suggestions.SharedSpeaker
+import dev.patrickgold.florisboard.repli.diagnostics.CaptureTelemetry
 
 /** Editable full-screen review. Corrections revoke the old approval and prepare a new payload. */
 class FullScreenContextReviewActivity : ComponentActivity() {
@@ -199,7 +200,7 @@ class FullScreenContextReviewActivity : ComponentActivity() {
                 orientation = LinearLayout.VERTICAL
                 addView(LinearLayout(this@FullScreenContextReviewActivity).apply {
                     addView(correctionButton("Edit") { editText(index) }, LinearLayout.LayoutParams(0, dp(38), 1f))
-                    addView(correctionButton("You/Them") { edits.flipSpeaker(index); renderRows() }, LinearLayout.LayoutParams(0, dp(38), 1f))
+                    addView(correctionButton("You/Them") { if (edits.flipSpeaker(index)) CaptureTelemetry(this@FullScreenContextReviewActivity).count(CaptureTelemetry.SPEAKER_CORRECTIONS); renderRows() }, LinearLayout.LayoutParams(0, dp(38), 1f))
                     if (message.source != null) addView(correctionButton("Source") { showSource(message) }, LinearLayout.LayoutParams(0, dp(38), 1f))
                 })
                 addView(LinearLayout(this@FullScreenContextReviewActivity).apply {
