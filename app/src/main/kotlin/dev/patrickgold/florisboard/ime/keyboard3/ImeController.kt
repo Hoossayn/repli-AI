@@ -48,7 +48,10 @@ import dev.patrickgold.florisboard.ime.nlp.latin.repli.RepliInputAssistant
 import dev.patrickgold.florisboard.ime.nlp.latin.repli.TypingContext
 import dev.patrickgold.florisboard.ime.nlp.latin.repli.WordPrediction
 import dev.patrickgold.florisboard.ime.nlp.latin.repli.WordPredictionEngine
+import dev.patrickgold.florisboard.repli.ime.ComposerSnapshot
 import dev.patrickgold.florisboard.repli.ime.RepliReplyOrchestrator
+import dev.patrickgold.florisboard.repli.ime.RewriteController
+import dev.patrickgold.florisboard.repli.suggestions.RewritePrivacyPolicy
 import dev.patrickgold.florisboard.ime.nlp.ClipboardSuggestionCandidate
 import dev.patrickgold.florisboard.ime.nlp.SuggestionCandidate
 import dev.patrickgold.florisboard.ime.text.key.KeyVariation
@@ -133,6 +136,45 @@ class ImeController(
                 }
             },
         )
+    }
+
+    val repliRewrite = context?.let { ctx ->
+        RewriteController(ctx.applicationContext, repliReply) { snapshot, text -> replaceComposerText(snapshot, text) }
+    }
+
+    /**
+     * The whole composer text, or null when it is longer than a rewrite allows (the bounded
+     * read cannot prove where the text ends). Offsets are absolute editor positions.
+     */
+    private fun readComposerSnapshot(): ComposerSnapshot? {
+        val limit = RewritePrivacyPolicy.MAX_TEXT_CHARACTERS + 1
+        val current = activeState.value
+        if (current.editor === ImeEditor.Disconnected) return null
+        val surrounding = current.editor.getSurroundingText(limit, limit)
+        if (surrounding.textBefore.length >= limit || surrounding.textAfter.length >= limit) return null
+        val selection = current.content.selection
+        if (selection.start < 0) return null
+        val start = selection.start - surrounding.textBefore.length
+        val text = surrounding.textBefore + surrounding.textSelected + surrounding.textAfter
+        return ComposerSnapshot(text = text, start = start.coerceAtLeast(0), length = text.length)
+    }
+
+    /** Replaces the composer text only if it still matches [snapshot]; the user keeps the send button. */
+    private fun replaceComposerText(snapshot: ComposerSnapshot, text: String): Boolean {
+        var replaced = false
+        updateStateBlocking {
+            val fresh = readComposerSnapshot()
+            if (fresh == null || fresh.text != snapshot.text) return@updateStateBlocking
+            lastAutoCorrection = null
+            val cursor = fresh.start + text.length
+            val cursorRange = K3TextRange(cursor, cursor)
+            state.editor.replaceText(fresh.start until fresh.start + fresh.length, text, cursorRange, null)
+            resetContent(cursorRange, state.editor.getSurroundingText(WordPredictionEngine.BEFORE_LIMIT, WordPredictionEngine.AFTER_LIMIT))
+            expectedContentQueue.push(state.content)
+            refreshRepliSuggestions(state)
+            replaced = true
+        }
+        return replaced
     }
 
     fun refreshRepliSuggestions() = refreshRepliSuggestions(activeState.value)
@@ -567,6 +609,14 @@ class ImeController(
                             .withImeUiMode(ImeUiMode.REPLI),
                     )
                     repliReply?.beginSuggestion()
+                }
+                ImeActions.RewriteText -> {
+                    val snapshot = readComposerSnapshot()
+                    state = state.copy(
+                        flags = state.flags
+                            .withImeUiMode(ImeUiMode.REPLI),
+                    )
+                    repliRewrite?.begin(snapshot)
                 }
                 ImeActions.Undo -> state.editor.performUndo()
                 ImeActions.Redo -> state.editor.performRedo()

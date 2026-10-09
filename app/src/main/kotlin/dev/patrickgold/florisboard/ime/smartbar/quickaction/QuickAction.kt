@@ -100,6 +100,7 @@ fun QuickAction.computeDisplayName(imeState: ImeState): String {
             ImeActions.ShowMediaPanel -> R.string.quick_action__ime_ui_mode_media
             ImeActions.ShowClipboardPanel -> R.string.quick_action__ime_ui_mode_clipboard
             ImeActions.SuggestReplies -> R.string.quick_action__suggest_replies
+            ImeActions.RewriteText -> R.string.quick_action__rewrite_text
             ImeActions.HideImeWindow -> R.string.quick_action__ime_hide_ui
             ImeActions.SwitchToNextSubtype -> R.string.quick_action__language_switch
             ImeActions.ToggleActionsOverflow -> R.string.quick_action__toggle_actions_overflow
@@ -141,6 +142,7 @@ fun QuickAction.computeTooltip(imeState: ImeState): String {
             ImeActions.ShowMediaPanel -> R.string.quick_action__ime_ui_mode_media__tooltip
             ImeActions.ShowClipboardPanel -> R.string.quick_action__ime_ui_mode_clipboard__tooltip
             ImeActions.SuggestReplies -> R.string.quick_action__suggest_replies__tooltip
+            ImeActions.RewriteText -> R.string.quick_action__rewrite_text__tooltip
             ImeActions.HideImeWindow -> R.string.quick_action__ime_hide_ui__tooltip
             ImeActions.SwitchToNextSubtype -> R.string.quick_action__language_switch__tooltip
             ImeActions.ToggleActionsOverflow -> R.string.quick_action__toggle_actions_overflow__tooltip

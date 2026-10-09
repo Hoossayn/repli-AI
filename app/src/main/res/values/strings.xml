@@ -132,6 +132,16 @@
     <string name="repli_reply__tap_to_insert">Tap to insert, then edit</string>
     <string name="repli_reply__cloud_timeout">Cloud timed out. Check your connection and retry.</string>
     <string name="repli_reply__failure_try_again" comment="%s is a short cloud failure label">%s · try again</string>
+
+    <!-- Repli rewrite panel -->
+    <string name="repli_rewrite__title">Rewrite</string>
+    <string name="repli_rewrite__retry">Again</string>
+    <string name="repli_rewrite__empty">Type your message first, then tap Rewrite.</string>
+    <string name="repli_rewrite__too_long">That message is too long to rewrite (600 characters max). Try a shorter part.</string>
+    <string name="repli_rewrite__working">Rewriting…</string>
+    <string name="repli_rewrite__ready">Tap a version to replace your text. You still press send.</string>
+    <string name="repli_rewrite__tap_hint">Tap a version to replace your text · nothing is sent for you</string>
+    <string name="repli_rewrite__text_changed">Your text changed while rewriting. Tap Rewrite again.</string>
     <string name="repli_learn__title">Learn by scrolling</string>
     <string name="repli_learn__profile_title">Who is this conversation with?</string>
     <string name="repli_learn__profile_empty_title">No saved chats yet</string>
@@ -278,6 +288,8 @@
     <string name="quick_action__voice_input" comment="Please mind the limited available space for the quick action strings">Voice input</string>
     <string name="quick_action__suggest_replies" comment="Please mind the limited available space for the quick action strings">Suggest replies</string>
     <string name="quick_action__suggest_replies__tooltip">Suggest Repli replies for this chat</string>
+    <string name="quick_action__rewrite_text" comment="Please mind the limited available space for the quick action strings">Rewrite</string>
+    <string name="quick_action__rewrite_text__tooltip">Rewrite what you typed in a different tone</string>
     <string name="quick_action__voice_input__tooltip" comment="IME stands for Input Method Editor and is indirectly equivalent to 'keyboard'.">Open voice input provider</string>
     <string name="quick_action__floating_window_mode" comment="Please mind the limited available space for the quick action strings">Floating</string>
     <string name="quick_action__floating_window_mode__tooltip">Toggle floating keyboard window mode</string>

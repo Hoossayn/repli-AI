@@ -316,6 +316,24 @@ private fun SmartbarMainRow(modifier: Modifier = Modifier) {
     }
 
     @Composable
+    fun RepliRewriteAction() {
+        val arrangement by prefs.smartbar.actionArrangement.collectAsState()
+        val rewriteAction = QuickAction.InsertK3Descriptor(ImeActions.RewriteText)
+        val surrounding = imeState.content.surroundingText
+        val hasDraft = surrounding.textBefore.isNotBlank() || surrounding.textSelected.isNotBlank() || surrounding.textAfter.isNotBlank()
+        if (imeState.flags.imeUiMode == ImeUiMode.TEXT &&
+            hasDraft &&
+            RepliFieldPolicy.allows(imeState.editor.info) &&
+            arrangement.stickyAction != rewriteAction
+        ) {
+            QuickActionButton(
+                action = rewriteAction,
+                modifier = Modifier.padding(horizontal = 4.dp),
+            )
+        }
+    }
+
+    @Composable
     fun StickyAction() {
         val actionArrangement by prefs.smartbar.actionArrangement.collectAsState()
 
@@ -379,11 +397,11 @@ private fun SmartbarMainRow(modifier: Modifier = Modifier) {
                 if (!flipToggles) {
                     SharedActionsToggle()
                     CenterContent()
-                    if (!sharedActionsExpanded) RepliReplyAction()
+                    if (!sharedActionsExpanded) { RepliRewriteAction(); RepliReplyAction() }
                     StickyAction()
                 } else {
                     StickyAction()
-                    if (!sharedActionsExpanded) RepliReplyAction()
+                    if (!sharedActionsExpanded) { RepliRewriteAction(); RepliReplyAction() }
                     CenterContent()
                     SharedActionsToggle()
                 }
@@ -393,11 +411,11 @@ private fun SmartbarMainRow(modifier: Modifier = Modifier) {
                 if (!flipToggles) {
                     ExtendedActionsToggle()
                     CenterContent()
-                    if (!extendedActionsExpanded) RepliReplyAction()
+                    if (!extendedActionsExpanded) { RepliRewriteAction(); RepliReplyAction() }
                     StickyAction()
                 } else {
                     StickyAction()
-                    if (!extendedActionsExpanded) RepliReplyAction()
+                    if (!extendedActionsExpanded) { RepliRewriteAction(); RepliReplyAction() }
                     CenterContent()
                     ExtendedActionsToggle()
                 }

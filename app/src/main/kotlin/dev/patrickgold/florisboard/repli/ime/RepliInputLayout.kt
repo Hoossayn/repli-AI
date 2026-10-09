@@ -207,12 +207,19 @@ fun RepliInputLayout(modifier: Modifier = Modifier) {
         return
     }
     val ui by orchestrator.uiState.collectAsState()
-    LaunchedEffect(ui.active, ui.generating, ui.suggestions.isEmpty()) {
+    val rewrite = imeController.repliRewrite
+    val rewriteActive = rewrite?.uiState?.collectAsState()?.value?.active == true
+    LaunchedEffect(ui.active, ui.generating, ui.suggestions.isEmpty(), rewriteActive) {
+        if (rewriteActive) return@LaunchedEffect
         if (!ui.active || (ui.generating && ui.suggestions.isEmpty())) {
             imeController.updateStateBlocking {
                 state = state.copy(flags = state.flags.withImeUiMode(ImeUiMode.TEXT))
             }
         }
+    }
+    if (rewriteActive && rewrite != null) {
+        RepliRewritePanel(rewrite, modifier)
+        return
     }
     val keyboardHeight = FlorisImeSizing.imeUiHeight()
     val moreHeight = minOf(LocalConfiguration.current.screenHeightDp.dp * 0.48f, 440.dp)

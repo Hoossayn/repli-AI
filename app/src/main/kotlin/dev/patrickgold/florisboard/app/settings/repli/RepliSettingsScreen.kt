@@ -243,6 +243,7 @@ fun RepliSettingsScreen() {
                     "AI read ${diagnostics.visionRead} · AI found nothing ${diagnostics.visionEmpty} · AI failed ${diagnostics.visionFailed} · AI unavailable ${diagnostics.visionUnavailable}\n" +
                     "Messages read ${diagnostics.turnsRead} · speaker fixes ${diagnostics.speakerCorrections} · messages removed ${diagnostics.turnsRemoved}\n" +
                     "Replies generated ${diagnostics.generationsSucceeded} · failed ${diagnostics.generationsFailed} · inserted ${diagnostics.repliesInserted}\n" +
+                    "Rewrites requested ${diagnostics.rewritesRequested} · failed ${diagnostics.rewritesFailed} · applied ${diagnostics.rewritesApplied}\n" +
                     "Quick replies ${diagnostics.quickReplies} · avg ${diagnostics.quickReplyMsAverage / 1000}s (last ${diagnostics.quickReplyMsLast / 1000}s)\n" +
                     "Captured replies ${diagnostics.captureReplyCount} · avg ${diagnostics.captureReplyMsAverage / 1000}s (last ${diagnostics.captureReplyMsLast / 1000}s)",
                 13, RepliStyle.muted,

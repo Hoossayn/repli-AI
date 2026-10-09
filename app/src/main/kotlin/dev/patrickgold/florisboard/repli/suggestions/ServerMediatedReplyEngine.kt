@@ -153,7 +153,7 @@ class ServerMediatedReplyEngine internal constructor(
     }
 }
 
-private object UrlConnectionReplyBackendTransport : ReplyBackendTransport {
+internal object UrlConnectionReplyBackendTransport : ReplyBackendTransport {
     private const val CONNECT_TIMEOUT_MS = 5_000
     // The provider itself has a 12-second timeout; leave room for backend accounting.
     private const val READ_TIMEOUT_MS = 15_000

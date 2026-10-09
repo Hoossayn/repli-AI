@@ -43,6 +43,9 @@ class CaptureTelemetry(context: Context) {
         generationsFailed = preferences.getInt(GENERATION_FAILED, 0),
         quickReplies = preferences.getInt(QUICK_REPLY, 0),
         repliesInserted = preferences.getInt(REPLY_INSERTED, 0),
+        rewritesRequested = preferences.getInt(REWRITE_REQUESTED, 0),
+        rewritesFailed = preferences.getInt(REWRITE_FAILED, 0),
+        rewritesApplied = preferences.getInt(REWRITE_APPLIED, 0),
         captureReplyCount = preferences.getInt("capture_reply_count", 0),
         captureReplyMsTotal = preferences.getLong("capture_reply_ms_total", 0),
         captureReplyMsLast = preferences.getLong("capture_reply_ms_last", 0),
@@ -68,6 +71,9 @@ class CaptureTelemetry(context: Context) {
         val generationsFailed: Int,
         val quickReplies: Int,
         val repliesInserted: Int,
+        val rewritesRequested: Int,
+        val rewritesFailed: Int,
+        val rewritesApplied: Int,
         val captureReplyCount: Int,
         val captureReplyMsTotal: Long,
         val captureReplyMsLast: Long,
@@ -94,6 +100,9 @@ class CaptureTelemetry(context: Context) {
         const val GENERATION_FAILED = "generation_failed"
         const val QUICK_REPLY = "quick_reply"
         const val REPLY_INSERTED = "reply_inserted"
+        const val REWRITE_REQUESTED = "rewrite_requested"
+        const val REWRITE_FAILED = "rewrite_failed"
+        const val REWRITE_APPLIED = "rewrite_applied"
         private const val PREFERENCES = "repli_capture_telemetry"
         private const val MAX_LATENCY_MS = 10 * 60 * 1_000L
     }
