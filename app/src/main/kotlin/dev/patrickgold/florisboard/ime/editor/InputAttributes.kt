@@ -67,6 +67,18 @@ value class InputAttributes private constructor(val raw: Int) {
     val capsMode: CapsMode
         get() = if (type == Type.TEXT) CapsMode.fromFlags(raw) else CapsMode.NONE
 
+    /** Capitalization requested while typing, including a sentence default for prose fields. */
+    val cursorCapsFlags: Int
+        get() = when {
+            type != Type.TEXT -> 0
+            capsMode != CapsMode.NONE -> raw
+            variation == Variation.NORMAL ||
+                variation == Variation.SHORT_MESSAGE ||
+                variation == Variation.LONG_MESSAGE ||
+                variation == Variation.WEB_EDIT_TEXT -> raw or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            else -> raw
+        }
+
     val flagNumberDecimal: Boolean
         get() = type == Type.NUMBER && (raw and InputType.TYPE_NUMBER_FLAG_DECIMAL != 0)
 

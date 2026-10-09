@@ -1,5 +1,6 @@
 package dev.patrickgold.florisboard.repli.capture
 
+import dev.patrickgold.florisboard.repli.suggestions.ReplyIntent
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -76,6 +77,29 @@ class ReplyCaptureSessionTest {
         val other = ReplyCaptureSession.begin(editor.copy(packageName = "different.app"), append = true)
         assertTrue(other.turns.isEmpty())
         assertEquals(0, other.frames)
+    }
+
+    @Test fun `fresh conversation intent survives guidance and added pages but resets for a new capture`() {
+        val first = ReplyCaptureSession.beginWithContext(editor, listOf(ConversationTurn("Okay, settled", false)))
+        ReplyCaptureSession.update(first.id) { it.copy(replyIntent = ReplyIntent.FRESH_START) }
+        val draft = ReplyCaptureSession.editGuidance(editor)
+        assertEquals(ReplyIntent.FRESH_START, draft.replyIntent)
+        ReplyCaptureSession.finishGuidance(draft.id, "Ask how their day was", reviewBeforeGenerate = true)
+        assertEquals(ReplyIntent.FRESH_START, ReplyCaptureSession.state.value?.replyIntent)
+        assertEquals(ReplyPhase.REVIEW, ReplyCaptureSession.state.value?.phase)
+        assertEquals(ReplyIntent.FRESH_START, ReplyCaptureSession.begin(editor, append = true).replyIntent)
+        assertEquals(ReplyIntent.REPLY, ReplyCaptureSession.begin(editor).replyIntent)
+    }
+
+    @Test fun `fresh opening with all old messages removed returns from guidance to review`() {
+        val review = ReplyCaptureSession.beginWithContext(editor, emptyList())
+        ReplyCaptureSession.update(review.id) { it.copy(replyIntent = ReplyIntent.FRESH_START) }
+        val draft = ReplyCaptureSession.editGuidance(editor)
+        ReplyCaptureSession.finishGuidance(draft.id, "Ask how their day went", reviewBeforeGenerate = true)
+        assertEquals(ReplyPhase.REVIEW, ReplyCaptureSession.state.value?.phase)
+        assertEquals(ReplyIntent.FRESH_START, ReplyCaptureSession.state.value?.replyIntent)
+        assertTrue(ReplyCaptureSession.state.value!!.turns.isEmpty())
+        assertEquals("Ask how their day went", ReplyCaptureSession.state.value?.instructions)
     }
 
     @Test fun `capture keeps the keyboard-hidden viewport through the consent round trip`() {

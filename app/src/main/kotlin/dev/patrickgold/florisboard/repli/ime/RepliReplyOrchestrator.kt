@@ -47,6 +47,7 @@ import dev.patrickgold.florisboard.repli.persona.BuiltInPersonas
 import dev.patrickgold.florisboard.repli.persona.Persona
 import dev.patrickgold.florisboard.repli.persona.PersonaRepository
 import dev.patrickgold.florisboard.repli.suggestions.PreparedRemoteReplyRequest
+import dev.patrickgold.florisboard.repli.suggestions.ReplyIntent
 import dev.patrickgold.florisboard.repli.suggestions.RemoteReplyPrivacyPolicy
 import dev.patrickgold.florisboard.repli.suggestions.RepliAccountSessionProvider
 import dev.patrickgold.florisboard.repli.suggestions.ServerMediatedContextEngine
@@ -112,6 +113,7 @@ data class RepliReplyUiState(
     val canUndoReviewRemoval: Boolean = false,
     val contextTurns: List<ConversationTurn> = emptyList(),
     val instructions: String? = null,
+    val replyIntent: ReplyIntent = ReplyIntent.REPLY,
     val approval: RepliApprovalCard? = null,
     val guidanceOpen: Boolean = false,
     val guidanceText: String = "",
@@ -586,7 +588,7 @@ class RepliReplyOrchestrator(
         pendingMore = false
         moreRepliesExpanded = false
         val current = ReplyCaptureSession.state.value ?: return
-        if (current.turns.isEmpty() || current.busy ||
+        if ((current.turns.isEmpty() && current.replyIntent != ReplyIntent.FRESH_START) || current.busy ||
             current.phase !in setOf(ReplyPhase.APPROVAL, ReplyPhase.READY)) return
         reviewingTurns = current.turns.toMutableList()
         ReplyCaptureSession.update(current.id) {
@@ -599,7 +601,7 @@ class RepliReplyOrchestrator(
 
     fun openReview() {
         val state = ReplyCaptureSession.state.value ?: return
-        if (state.turns.isEmpty() || state.busy) return
+        if ((state.turns.isEmpty() && state.replyIntent != ReplyIntent.FRESH_START) || state.busy) return
         if (state.phase == ReplyPhase.CAPTURE_REVIEW) return
         reviewingTurns = state.turns.toMutableList()
         removedReviewTurn = null
@@ -642,10 +644,19 @@ class RepliReplyOrchestrator(
         publish()
     }
 
+    fun setReplyIntent(intent: ReplyIntent) {
+        val state = ReplyCaptureSession.state.value ?: return
+        if (state.busy || reviewingTurns == null) return
+        pendingRemoteRequest = null
+        lastApprovedRequest = null
+        ReplyCaptureSession.update(state.id) { it.copy(replyIntent = intent, generationError = null) }
+        publish()
+    }
+
     fun useReviewedContext() {
         val state = ReplyCaptureSession.state.value ?: return
         val edited = reviewingTurns ?: return
-        if (edited.isEmpty()) return
+        if (edited.isEmpty() && state.replyIntent != ReplyIntent.FRESH_START) return
         reviewingTurns = null
         removedReviewTurn = null
         pendingRemoteRequest = null
@@ -887,7 +898,7 @@ class RepliReplyOrchestrator(
             val persona = selectedPersona()
             val fresh = RemoteReplyPrivacyPolicy.prepare(
                 current.turns, persona.baseStyle, snapshot, instructions = current.instructions,
-                profileId = profile?.id, persona = persona,
+                profileId = profile?.id, persona = persona, replyIntent = current.replyIntent,
             )
             if (fresh != displayed) return@launch
             withContext(Dispatchers.Main) {
@@ -1131,7 +1142,7 @@ class RepliReplyOrchestrator(
                 val persona = selectedPersona()
                 val prepared = RemoteReplyPrivacyPolicy.prepare(
                     state.turns, persona.baseStyle, snapshot, instructions = state.instructions,
-                    profileId = profile?.id, persona = persona,
+                    profileId = profile?.id, persona = persona, replyIntent = state.replyIntent,
                 )
                 withContext(Dispatchers.Main) {
                     if (ReplyCaptureSession.state.value?.id != state.id) return@withContext
@@ -1354,6 +1365,7 @@ class RepliReplyOrchestrator(
             canUndoReviewRemoval = removedReviewTurn?.sessionId == session?.id && review != null,
             contextTurns = session?.turns.orEmpty(),
             instructions = session?.instructions,
+            replyIntent = session?.replyIntent ?: ReplyIntent.REPLY,
             approval = approval,
             guidanceOpen = guidanceOpen,
             guidanceText = if (guidanceOpen) guidanceDraftText else "",

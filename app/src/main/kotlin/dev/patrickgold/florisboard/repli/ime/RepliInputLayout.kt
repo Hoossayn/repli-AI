@@ -9,6 +9,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -55,6 +57,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -66,6 +69,7 @@ import dev.patrickgold.florisboard.ime.ImeUiMode
 import dev.patrickgold.florisboard.ime.keyboard.FlorisImeSizing
 import dev.patrickgold.florisboard.ime.keyboard3.LocalImeController
 import dev.patrickgold.florisboard.repli.capture.ConversationTurn
+import dev.patrickgold.florisboard.repli.suggestions.ReplyIntent
 import dev.patrickgold.florisboard.repli.voice.VoicePhase
 import dev.patrickgold.florisboard.repli.voice.VoiceRecordingState
 import kotlinx.coroutines.delay
@@ -317,6 +321,7 @@ fun RepliInputLayout(modifier: Modifier = Modifier) {
             return@Column
         }
         if (ui.reviewing && !ui.showChatPicker) {
+            ReplyIntentSelector(ui.replyIntent, orchestrator::setReplyIntent)
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp),
                 verticalAlignment = Alignment.CenterVertically) {
                 Text("${ui.reviewFrames} view${if (ui.reviewFrames == 1) "" else "s"} · ${ui.reviewTurns.size} messages",
@@ -439,7 +444,7 @@ fun RepliInputLayout(modifier: Modifier = Modifier) {
             ui.showChatPicker -> PanelFooter("Done", onClick = orchestrator::closeChatPicker)
             ui.reviewing -> PanelFooter(
                 "Repli, give me ideas",
-                enabled = ui.reviewTurns.isNotEmpty(),
+                enabled = ui.reviewTurns.isNotEmpty() || ui.replyIntent == ReplyIntent.FRESH_START,
                 onClick = orchestrator::useReviewedContext,
             )
             ui.approval != null -> PanelFooter("Generate cloud replies", onClick = orchestrator::approveGenerate)
@@ -574,6 +579,29 @@ private fun ReviewBody(
                     Icon(Icons.Default.Close, contentDescription = "Remove message ${index + 1}",
                         tint = Muted, modifier = Modifier.size(18.dp))
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReplyIntentSelector(selected: ReplyIntent, onSelect: (ReplyIntent) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).selectableGroup(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        listOf(ReplyIntent.REPLY to "Reply to this chat", ReplyIntent.FRESH_START to "Start something new").forEach { (intent, label) ->
+            Surface(
+                modifier = Modifier.weight(1f).selectable(
+                    selected = selected == intent, role = Role.RadioButton, onClick = { onSelect(intent) },
+                ),
+                shape = RoundedCornerShape(14.dp),
+                color = if (selected == intent) AccentSoft else Card,
+                border = BorderStroke(1.dp, if (selected == intent) Accent else Line),
+            ) {
+                Text(label, modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp),
+                    color = if (selected == intent) Accent else Muted,
+                    fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             }
         }
     }

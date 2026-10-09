@@ -158,6 +158,7 @@ class ReplyScreenCaptureService : Service() {
         if (manualCaptureActive && !capturePageRequested) return
         val image = runCatching { reader?.acquireLatestImage() }.getOrNull()
         if (image == null) { handler.postDelayed(captureAttempt, 100); return }
+        val frameAcquiredAt = SystemClock.elapsedRealtime()
         processing = true
         val bitmaps = try {
             image.captureBitmaps(viewport.contentBottom, capturedContactName == null)
@@ -183,68 +184,81 @@ class ReplyScreenCaptureService : Service() {
             }
         }
         ReplyCaptureSession.update(requestId) { it.copy(phase = ReplyPhase.READING, message = "Reading visible messages on your phone…") }
+        val readStartedAt = SystemClock.elapsedRealtime()
         val imageBytes = bitmap.privateVisionPng()
+        val imageEncodingMs = SystemClock.elapsedRealtime() - readStartedAt
         recognizerUsed = true
-        try {
-            var recognizedTurns: List<ConversationTurn> = emptyList()
-            recognizer.process(InputImage.fromBitmap(bitmap, 0))
-                .addOnSuccessListener { text ->
-                    if (destroyed || ReplyCaptureSession.state.value?.id != requestId) return@addOnSuccessListener
-                    val regions = text.textBlocks.flatMap { block ->
-                        val lines = block.lines
-                        val isSelfQuote = lines.firstOrNull()?.text
-                            ?.trim()?.removeSuffix(":")?.equals("you", ignoreCase = true) == true
-                        if (isSelfQuote && lines.size >= 2) {
-                            lines.mapNotNull { line ->
-                                val bounds = line.boundingBox ?: return@mapNotNull null
-                                OcrTextRegion(line.text, bounds.left, bounds.top, bounds.right, bounds.bottom)
-                            }
-                        } else {
-                            val bounds = block.boundingBox
-                            if (bounds == null) emptyList()
-                            else listOf(OcrTextRegion(block.text, bounds.left, bounds.top, bounds.right, bounds.bottom))
-                        }
-                    }
-                    recognizedTurns = ReplyConversation.extract(regions, bitmap.width, bitmap.height)
-                }
-                .addOnCompleteListener {
-                    bitmap.recycle()
-                    finishReadingHeader(headerBitmap, recognizedTurns, imageBytes, signature)
-                }
-        } catch (_: Exception) {
-            bitmap.recycle()
-            finishReadingHeader(headerBitmap, emptyList(), imageBytes, signature)
-        }
-    }
-
-    private fun finishReadingHeader(
-        headerBitmap: Bitmap?, frameTurns: List<ConversationTurn>, imageBytes: ByteArray?, signature: IntArray,
-    ) {
-        if (headerBitmap == null || destroyed || ReplyCaptureSession.state.value?.id != requestId) {
-            headerBitmap?.recycle()
-            processing = false
-            finishFrame(frameTurns, imageBytes, signature)
-            return
-        }
+        var recognizedTurns: List<ConversationTurn> = emptyList()
         var contactName: String? = null
+        var chatReadComplete = false
+        var headerReadComplete = headerBitmap == null
+        var frameCompleted = false
+
+        fun finishWhenBothReady() {
+            if (frameCompleted || !chatReadComplete || !headerReadComplete) return
+            frameCompleted = true
+            bitmap.recycle()
+            headerBitmap?.recycle()
+            if (capturedContactName == null) capturedContactName = contactName
+            processing = false
+            flogDebug {
+                "RepliCapture: frame read framePreparationMs=${readStartedAt - frameAcquiredAt} " +
+                    "imageEncodingMs=$imageEncodingMs " +
+                    "localRecognitionMs=${SystemClock.elapsedRealtime() - readStartedAt - imageEncodingMs}"
+            }
+            finishFrame(recognizedTurns, imageBytes, signature)
+        }
+
         try {
-            recognizer.process(InputImage.fromBitmap(headerBitmap, 0))
-                .addOnSuccessListener { text ->
-                    val lines = text.textBlocks.flatMap { it.lines }
-                        .sortedBy { it.boundingBox?.top ?: Int.MAX_VALUE }
-                        .map { it.text }
-                    contactName = CapturedContactName.fromHeaderLines(lines)
-                }
-                .addOnCompleteListener {
-                    headerBitmap.recycle()
-                    if (capturedContactName == null) capturedContactName = contactName
-                    processing = false
-                    finishFrame(frameTurns, imageBytes, signature)
+            recognizer.process(InputImage.fromBitmap(bitmap, 0))
+                .addOnCompleteListener { task ->
+                    if (!destroyed && ReplyCaptureSession.state.value?.id == requestId && task.isSuccessful) {
+                        recognizedTurns = runCatching {
+                            val text = task.result
+                            val regions = text.textBlocks.flatMap { block ->
+                                val lines = block.lines
+                                val isSelfQuote = lines.firstOrNull()?.text
+                                    ?.trim()?.removeSuffix(":")?.equals("you", ignoreCase = true) == true
+                                if (isSelfQuote && lines.size >= 2) {
+                                    lines.mapNotNull { line ->
+                                        val bounds = line.boundingBox ?: return@mapNotNull null
+                                        OcrTextRegion(line.text, bounds.left, bounds.top, bounds.right, bounds.bottom)
+                                    }
+                                } else {
+                                    val bounds = block.boundingBox
+                                    if (bounds == null) emptyList()
+                                    else listOf(OcrTextRegion(block.text, bounds.left, bounds.top, bounds.right, bounds.bottom))
+                                }
+                            }
+                            ReplyConversation.extract(regions, bitmap.width, bitmap.height)
+                        }.getOrDefault(emptyList())
+                    }
+                    chatReadComplete = true
+                    finishWhenBothReady()
                 }
         } catch (_: Exception) {
-            headerBitmap.recycle()
-            processing = false
-            finishFrame(frameTurns, imageBytes, signature)
+            chatReadComplete = true
+            finishWhenBothReady()
+        }
+        if (headerBitmap != null) {
+            try {
+                recognizer.process(InputImage.fromBitmap(headerBitmap, 0))
+                    .addOnCompleteListener { task ->
+                        if (!destroyed && ReplyCaptureSession.state.value?.id == requestId && task.isSuccessful) {
+                            contactName = runCatching {
+                                val lines = task.result.textBlocks.flatMap { it.lines }
+                                    .sortedBy { it.boundingBox?.top ?: Int.MAX_VALUE }
+                                    .map { it.text }
+                                CapturedContactName.fromHeaderLines(lines)
+                            }.getOrNull()
+                        }
+                        headerReadComplete = true
+                        finishWhenBothReady()
+                    }
+            } catch (_: Exception) {
+                headerReadComplete = true
+                finishWhenBothReady()
+            }
         }
     }
 

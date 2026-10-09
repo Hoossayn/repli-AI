@@ -40,7 +40,7 @@ class WordPredictionEngine {
         adaptiveEnabled = enabled
     }
 
-    fun suggest(context: TypingContext, limit: Int? = null): List<WordPrediction> {
+    fun suggest(context: TypingContext, limit: Int? = null, includeAdaptive: Boolean = true): List<WordPrediction> {
         if (context.selectionStart < 0 || context.selectionStart != context.selectionEnd) return emptyList()
         val before = context.before
         val after = context.after
@@ -61,7 +61,7 @@ class WordPredictionEngine {
         var correctionWords = emptySet<String>()
         val words = if (prefix.isNotEmpty()) {
             val loadedLexicon = lexicon
-            val adaptive = adaptiveModel.takeIf { adaptiveEnabled }
+            val adaptive = adaptiveModel.takeIf { adaptiveEnabled && includeAdaptive }
             if (loadedLexicon == null) {
                 (adaptive?.completions(normalized, 3).orEmpty() +
                     vocabulary.filter { it.startsWith(normalized) && it != normalized })
@@ -72,7 +72,9 @@ class WordPredictionEngine {
                     loadedLexicon.completions(normalized, 6).map(LexiconWord::word))
                     .distinctBy { it.lowercase(Locale.ROOT) }
                     .filterNot { it.equals(normalized, ignoreCase = true) }
-                if (completions.isNotEmpty()) completions else {
+                // Keep the contraction visible while typing, including when the bare word is valid.
+                val contraction = AMBIGUOUS_CONTRACTIONS[normalized]?.let(::listOf).orEmpty()
+                if (completions.isNotEmpty() || contraction.isNotEmpty()) contraction + completions else {
                     val corrections = if (normalized in PROTECTED_DIALECT_WORDS) emptyList() else (
                         adaptive?.corrections(normalized, 3).orEmpty() +
                             loadedLexicon.corrections(normalized, 3).map(LexiconWord::word)
@@ -88,7 +90,7 @@ class WordPredictionEngine {
         } else if (sentenceStart) listOf("hello", "i", "thanks")
         else {
             val phraseWords = phrases[tokens.joinToString(" ")] ?: phrases[tokens.lastOrNull()]
-            val adaptiveWords = adaptiveModel.takeIf { adaptiveEnabled }?.nextWords(tokens, 3).orEmpty()
+            val adaptiveWords = adaptiveModel.takeIf { adaptiveEnabled && includeAdaptive }?.nextWords(tokens, 3).orEmpty()
             (adaptiveWords + phraseWords.orEmpty() +
                 lexicon?.nextWords(tokens.lastOrNull().orEmpty(), 3).orEmpty().map(LexiconWord::word) +
                 listOf("the", "and", "to"))
@@ -117,16 +119,26 @@ class WordPredictionEngine {
     }
 
     /** Returns only high-confidence, one-edit corrections suitable for committing on a separator. */
-    fun autocorrection(context: TypingContext): WordPrediction? {
+    fun autocorrection(context: TypingContext, includeAdaptive: Boolean = true): WordPrediction? {
         if (context.selectionStart < 0 || context.selectionStart != context.selectionEnd || context.after.firstOrNull()?.let(::wordCharacter) == true) {
             return null
         }
+        val chunk = context.before.takeLastWhile { !it.isWhitespace() }
+        if (chunk.contains('@') || chunk.contains("://") || chunk.startsWith("www.", true)) return null
         val prefix = context.before.takeLastWhile(::wordCharacter)
         if (prefix.length !in 3..20 || prefix.any { !wordCharacter(it) }) return null
         val normalized = prefix.lowercase(Locale.ROOT).replace('’', '\'')
         // Common Nigerian Pidgin words should never be "fixed" into a different English word.
         if (normalized in PROTECTED_DIALECT_WORDS) return null
-        val adaptive = adaptiveModel.takeIf { adaptiveEnabled }
+        // Repli prefers the contraction in chat; immediate Backspace can restore the possessive.
+        if (normalized == "its") {
+            return WordPrediction(preserveCase("it's", prefix, false), prefix.length, 0, space = false, correction = true)
+        }
+        // Correct other missing apostrophes only where the bare spelling is uncommon.
+        UNAMBIGUOUS_CONTRACTIONS[normalized]?.let { contraction ->
+            return WordPrediction(preserveCase(contraction, prefix, false), prefix.length, 0, space = false, correction = true)
+        }
+        val adaptive = adaptiveModel.takeIf { adaptiveEnabled && includeAdaptive }
         if (adaptive?.contains(normalized) == true) return null
         val loadedLexicon = lexicon ?: return null
         if (loadedLexicon.contains(normalized)) return null
@@ -158,6 +170,13 @@ class WordPredictionEngine {
             word.lowercase(Locale.ROOT).replace('’', '\'') in PROTECTED_DIALECT_WORDS
         private val tokenPattern = Regex("[a-z]+(?:'[a-z]+)?")
         private val ALWAYS_CORRECT = setOf("the", "and", "you", "that", "with", "this", "have", "for")
+        private val AMBIGUOUS_CONTRACTIONS = mapOf("its" to "it's")
+        private val UNAMBIGUOUS_CONTRACTIONS = mapOf(
+            "dont" to "don't", "doesnt" to "doesn't", "didnt" to "didn't",
+            "cant" to "can't", "wont" to "won't", "isnt" to "isn't",
+            "arent" to "aren't", "youre" to "you're", "theyre" to "they're",
+            "weve" to "we've", "ive" to "I've", "thats" to "that's",
+        )
         private val PROTECTED_DIALECT_WORDS = setOf(
             "abeg", "abi", "dey", "don", "na", "oya", "sef", "sha", "una", "wahala", "wetin",
         )

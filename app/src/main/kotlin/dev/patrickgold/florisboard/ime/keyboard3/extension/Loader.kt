@@ -67,5 +67,6 @@ suspend fun loadFoundationKeyboard(imeController: ImeController, storage: Storag
         imeController.updateState {
             switchModel(result.model)
         }
+        imeController.refreshRepliSuggestions()
     }
 }

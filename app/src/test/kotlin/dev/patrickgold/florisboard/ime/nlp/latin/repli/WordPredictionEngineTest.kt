@@ -15,8 +15,17 @@ class WordPredictionEngineTest {
     @Test
     fun `commits a common typo but leaves dialect and mid-word text alone`() {
         assertEquals("the", engine.autocorrection(TypingContext("teh", "", 3, 3))?.word)
+        assertEquals("don't", engine.autocorrection(TypingContext("dont", "", 4, 4))?.word)
         assertNull(engine.autocorrection(TypingContext("abeg", "", 4, 4)))
         assertNull(engine.autocorrection(TypingContext("teh", "re", 3, 3)))
+        assertNull(engine.autocorrection(TypingContext("name@dont", "", 9, 9)))
+    }
+
+    @Test
+    fun `offers and autocorrects the chat contraction`() {
+        val context = TypingContext("its", "", 3, 3)
+        assertEquals("it's", engine.suggest(context).first().word)
+        assertEquals("it's", engine.autocorrection(context)?.word)
     }
 
     @Test
@@ -35,5 +44,14 @@ class WordPredictionEngineTest {
         assertEquals("replify", engine.suggest(TypingContext("repl", "", 4, 4)).first().word)
         engine.setAdaptiveEnabled(false)
         assertTrue(engine.suggest(TypingContext("repl", "", 4, 4)).none { it.word == "replify" })
+    }
+
+    @Test
+    fun `private predictions use the bundled lexicon without learned words`() {
+        val model = AdaptiveLanguageModel().apply { repeat(3) { observe(listOf("good"), "replify") } }
+        engine.installAdaptiveModel(model)
+        assertTrue(engine.suggest(TypingContext("repl", "", 4, 4)).any { it.word == "replify" })
+        assertTrue(engine.suggest(TypingContext("repl", "", 4, 4), includeAdaptive = false).none { it.word == "replify" })
+        assertTrue(engine.suggest(TypingContext("hell", "", 4, 4), includeAdaptive = false).any { it.word == "hello" })
     }
 }

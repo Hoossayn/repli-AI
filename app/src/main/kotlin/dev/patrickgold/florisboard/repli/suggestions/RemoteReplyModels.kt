@@ -6,6 +6,7 @@ import dev.patrickgold.florisboard.repli.profile.LearnedTextingStyle
 import dev.patrickgold.florisboard.repli.profile.VoiceStyle
 import dev.patrickgold.florisboard.repli.persona.Persona
 import kotlin.math.abs
+import java.util.TimeZone
 
 enum class ReplyOrigin { REMOTE, ON_DEVICE, ON_DEVICE_FALLBACK }
 
@@ -13,6 +14,13 @@ data class ReplyGenerationResult(
     val replies: List<String>,
     val explanation: String,
     val origin: ReplyOrigin,
+)
+
+enum class ReplyIntent(val wireValue: String) { REPLY("reply"), FRESH_START("fresh_start") }
+
+data class SharedReplySituation(
+    val intent: ReplyIntent = ReplyIntent.REPLY,
+    val timeZoneId: String = TimeZone.getDefault().id,
 )
 
 enum class SharedSpeaker(val wireValue: String) { ME("me"), THEM("them") }
@@ -34,12 +42,14 @@ data class PreparedRemoteReplyRequest(
     val style: SharedReplyStyle,
     val instructions: String? = null,
     val profileId: String? = null,
+    val replySituation: SharedReplySituation = SharedReplySituation(),
 )
 
 /**
  * Applies the privacy boundary before the network layer sees any data. It has no
  * fields for package names, contact names, notification metadata, screenshots,
  * or the retained message corpus. A selected profile contributes only its opaque ID.
+ * The device timezone is shared only to situate the requested reply in local time.
  */
 object RemoteReplyPrivacyPolicy {
     const val MAX_CONTEXT_TURNS = 60
@@ -56,6 +66,8 @@ object RemoteReplyPrivacyPolicy {
         instructions: String? = null,
         profileId: String? = null,
         persona: Persona? = null,
+        replyIntent: ReplyIntent = ReplyIntent.REPLY,
+        timeZoneId: String = TimeZone.getDefault().id,
     ): PreparedRemoteReplyRequest {
         val context = turns
             .mapNotNull { turn ->
@@ -78,6 +90,7 @@ object RemoteReplyPrivacyPolicy {
             ),
             instructions = prepareInstructions(instructions),
             profileId = profileId,
+            replySituation = SharedReplySituation(replyIntent, timeZoneId),
         )
     }
 

@@ -100,6 +100,13 @@ class ImeController(
     private val breakIterators = BreakIterators()
     private val expectedContentQueue = ExpectedContentQueue()
     private val emojiCommitGuard = Mutex()
+    private data class AutoCorrectionUndo(
+        val editor: ImeEditor,
+        val cursor: Int,
+        val correctedText: String,
+        val originalWord: String,
+    )
+    private var lastAutoCorrection: AutoCorrectionUndo? = null
     private val _repliSuggestions = MutableStateFlow<List<WordPrediction>>(emptyList())
     val repliSuggestions = _repliSuggestions.asStateFlow()
     val repliAssistant = context?.let { RepliInputAssistant(it) { refreshRepliSuggestions() } }
@@ -133,14 +140,14 @@ class ImeController(
     private fun refreshRepliSuggestions(current: ImeState) {
         val assistant = repliAssistant
         _repliSuggestions.value = if (assistant != null && isRepliAllowed(current)) {
-            assistant.suggest(current.typingContext())
+            assistant.suggest(current.typingContext(), privateSession = current.flags.isIncognitoMode)
         } else emptyList()
     }
 
     private fun isRepliAllowed(current: ImeState): Boolean =
         current.editor !== ImeEditor.Disconnected &&
             current.model.locales.firstOrNull()?.startsWith("en") == true &&
-            !current.flags.isIncognitoMode && prefs.suggestion.enabled.get() &&
+            prefs.suggestion.enabled.get() &&
             TypingPredictionPolicy.allows(current.editor.info) &&
             current.content.selection.isCollapsed()
 
@@ -154,11 +161,12 @@ class ImeController(
     fun commitRepliSuggestion(prediction: WordPrediction) {
         if (repliReply?.isEditingInlineGuidance() == true) return
         updateStateBlocking {
-            if (!isRepliAllowed(state) || repliAssistant?.suggest(state.typingContext())?.contains(prediction) != true) return@updateStateBlocking
+            lastAutoCorrection = null
+            if (!isRepliAllowed(state) || repliAssistant?.suggest(state.typingContext(), state.flags.isIncognitoMode)?.contains(prediction) != true) return@updateStateBlocking
             val before = state.content.surroundingText.textBefore
             val previous = before.dropLast(prediction.removeBefore)
             replaceRepliWord(prediction)
-            repliAssistant.learn(previous, prediction.word)
+            if (!state.flags.isIncognitoMode) repliAssistant.learn(previous, prediction.word)
             refreshRepliSuggestions(state)
         }
     }
@@ -318,6 +326,7 @@ class ImeController(
             ic: WeakReference<InputConnection>,
             info: FlorisEditorInfo,
         ) {
+            lastAutoCorrection = null
             val newTouchLayerId: K3LayerId
             val keyVariation: KeyVariation
             when (info.inputAttributes.type) {
@@ -424,6 +433,9 @@ class ImeController(
         }
 
         fun handleUpdateSelection(newSelection: K3TextRange) {
+            if (lastAutoCorrection?.cursor != newSelection.start || !newSelection.isCollapsed()) {
+                lastAutoCorrection = null
+            }
             val content = expectedContentQueue.popUntilOrNull { it.selection == newSelection }
             if (content != null) {
                 flogDebug { "DEDUPLICATED!!1" }
@@ -443,22 +455,27 @@ class ImeController(
             val before = state.content.surroundingText.textBefore
             val after = state.content.surroundingText.textAfter
             val word = before.takeLastWhile { it.isLetter() || it == '\'' || it == '’' }
-            val canLearn = word.isNotEmpty() && committedText.firstOrNull()?.let { !it.isLetter() && it != '\'' && it != '’' } == true &&
+            val canProcessWord = word.isNotEmpty() && committedText.firstOrNull()?.let { !it.isLetter() && it != '\'' && it != '’' } == true &&
                 after.firstOrNull()?.let { it.isLetter() || it == '\'' || it == '’' } != true &&
                 !before.takeLastWhile { !it.isWhitespace() }.let { it.contains('@') || it.contains("://") || it.startsWith("www.", true) } &&
                 isRepliAllowed(state)
             var learnedWord = word
-            if (canLearn && committedText == " ") {
-                val correction = repliAssistant?.autocorrection(state.typingContext())
+            var appliedCorrection: WordPrediction? = null
+            if (canProcessWord && committedText == " ") {
+                val correction = repliAssistant?.autocorrection(state.typingContext(), privateSession = state.flags.isIncognitoMode)
                     ?.takeIf { it.removeBefore == word.length && it.removeAfter == 0 }
                 if (correction != null) {
                     replaceRepliWord(correction)
                     learnedWord = correction.word
+                    appliedCorrection = correction
                 }
             }
             super.emitText(value)
+            lastAutoCorrection = appliedCorrection?.let { correction ->
+                AutoCorrectionUndo(state.editor, state.content.selection.start, correction.word + committedText, word)
+            }
             expectedContentQueue.push(state.content)
-            if (canLearn) repliAssistant?.learn(before.dropLast(word.length), learnedWord)
+            if (canProcessWord && !state.flags.isIncognitoMode) repliAssistant?.learn(before.dropLast(word.length), learnedWord)
             refreshRepliSuggestions(state)
             reevaluateInputShiftState()
         }
@@ -586,6 +603,19 @@ class ImeController(
         override fun emitBackspace() {
             if (repliReply?.isEditingInlineGuidance() == true) {
                 repliReply.deleteGuidance()
+                return
+            }
+            val undo = lastAutoCorrection
+            lastAutoCorrection = null
+            if (undo != null && state.editor === undo.editor &&
+                state.content.selection.isCollapsed() && state.content.selection.start == undo.cursor &&
+                state.content.surroundingText.textBefore.endsWith(undo.correctedText)) {
+                val start = undo.cursor - undo.correctedText.length
+                val selection = K3TextRange(start + undo.originalWord.length, start + undo.originalWord.length)
+                state.editor.replaceText(start until undo.cursor, undo.originalWord, selection, null)
+                resetContent(selection, state.editor.getSurroundingText(WordPredictionEngine.BEFORE_LIMIT, WordPredictionEngine.AFTER_LIMIT))
+                expectedContentQueue.push(state.content)
+                refreshRepliSuggestions(state)
                 return
             }
             super.emitBackspace()
@@ -780,6 +810,7 @@ class ImeController(
         }
 
         fun handleFinishInputView() {
+            lastAutoCorrection = null
             resetContent()
             state = state.copy(editor = ImeEditor.Disconnected)
             expectedContentQueue.clear()
@@ -855,6 +886,6 @@ private class ExpectedContentQueue {
 
 fun K3Content.cursorCapsMode(inputAttributes: InputAttributes): InputAttributes.CapsMode {
     return InputAttributes.CapsMode.fromFlags(
-        TextUtils.getCapsMode(surroundingText.textBefore, surroundingText.textBefore.length, inputAttributes.raw)
+        TextUtils.getCapsMode(surroundingText.textBefore, surroundingText.textBefore.length, inputAttributes.cursorCapsFlags)
     )
 }

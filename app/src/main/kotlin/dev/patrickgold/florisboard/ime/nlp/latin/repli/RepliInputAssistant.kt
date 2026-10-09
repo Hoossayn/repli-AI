@@ -39,14 +39,15 @@ class RepliInputAssistant(context: Context, private val onReady: () -> Unit) {
         }
     }
 
-    fun suggest(context: TypingContext): List<WordPrediction> {
-        val correction = engine.autocorrection(context)?.copy(space = true)
-        return (listOfNotNull(correction) + engine.suggest(context))
+    fun suggest(context: TypingContext, privateSession: Boolean = false): List<WordPrediction> {
+        val correction = engine.autocorrection(context, includeAdaptive = !privateSession)?.copy(space = true)
+        return (listOfNotNull(correction) + engine.suggest(context, includeAdaptive = !privateSession))
             .distinctBy { it.word.lowercase() }
             .take(3)
     }
 
-    fun autocorrection(context: TypingContext): WordPrediction? = engine.autocorrection(context)
+    fun autocorrection(context: TypingContext, privateSession: Boolean = false): WordPrediction? =
+        engine.autocorrection(context, includeAdaptive = !privateSession)
 
     fun learn(contextBeforeWord: String, committedWord: String) {
         if (!ready || !preferences.enabled) return

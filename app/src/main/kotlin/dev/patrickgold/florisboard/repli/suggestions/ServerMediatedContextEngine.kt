@@ -1,9 +1,11 @@
 package dev.patrickgold.florisboard.repli.suggestions
 
+import android.os.SystemClock
 import dev.patrickgold.florisboard.repli.capture.ConversationTurn
 import dev.patrickgold.florisboard.repli.capture.TurnSource
 import dev.patrickgold.florisboard.repli.capture.VisualBubble
 import dev.patrickgold.florisboard.repli.identity.CapturedContactName
+import dev.patrickgold.florisboard.lib.devtools.flogDebug
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.net.HttpURLConnection
@@ -43,9 +45,11 @@ class ServerMediatedContextEngine internal constructor(
         require(images.all { it.isNotEmpty() && it.size <= MAX_IMAGE_BYTES } &&
             images.sumOf(ByteArray::size) <= MAX_TOTAL_IMAGE_BYTES
         ) { "Cropped chat images are too large" }
+        val startedAt = SystemClock.elapsedRealtime()
         val bearerToken = sessionProvider.bearerTokenForRequest()
             ?: throw RemoteReplyAuthenticationException("A Repli account session is required")
         require(BEARER_TOKEN_PATTERN.matches(bearerToken)) { "Invalid Repli account session" }
+        val authenticatedAt = SystemClock.elapsedRealtime()
         val encodedImages = try {
             images.map(Base64.getEncoder()::encodeToString)
         } finally {
@@ -62,10 +66,16 @@ class ServerMediatedContextEngine internal constructor(
             .toString().toByteArray(Charsets.UTF_8)
         require(request.size <= MAX_REQUEST_BYTES) { "Cropped chat image request is too large" }
 
+        val networkStartedAt = SystemClock.elapsedRealtime()
         val response = try {
             transport.post(endpoint, bearerToken, request)
         } finally {
             request.fill(0)
+            flogDebug {
+                "RepliCapture: image request authMs=${authenticatedAt - startedAt} " +
+                    "requestEncodingMs=${networkStartedAt - authenticatedAt} " +
+                    "networkAndAiMs=${SystemClock.elapsedRealtime() - networkStartedAt}"
+            }
         }
         if (response.status == HttpURLConnection.HTTP_UNAUTHORIZED ||
             response.status == HttpURLConnection.HTTP_FORBIDDEN

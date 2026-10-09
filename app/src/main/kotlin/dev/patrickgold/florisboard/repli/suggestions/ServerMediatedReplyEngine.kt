@@ -94,9 +94,11 @@ class ServerMediatedReplyEngine internal constructor(
 
     private fun PreparedRemoteReplyRequest.toJson() = JSONObject().apply {
         // An older server must reject guidance, not silently generate without applying it.
-        put("contract_version", if (style.personaName != null) PERSONA_CONTRACT_VERSION
-            else if (profileId != null) MEMORY_CONTRACT_VERSION
-            else if (instructions == null) CONTRACT_VERSION else GUIDANCE_CONTRACT_VERSION)
+        put("contract_version", SITUATION_CONTRACT_VERSION)
+        put("reply_situation", JSONObject().apply {
+            put("intent", replySituation.intent.wireValue)
+            put("time_zone", replySituation.timeZoneId)
+        })
         if (profileId != null) {
             require(PROFILE_ID_PATTERN.matches(profileId)) { "Invalid profile ID" }
             put("profile_id", profileId)
@@ -130,6 +132,7 @@ class ServerMediatedReplyEngine internal constructor(
         const val GUIDANCE_CONTRACT_VERSION = 2
         const val MEMORY_CONTRACT_VERSION = 3
         const val PERSONA_CONTRACT_VERSION = 4
+        const val SITUATION_CONTRACT_VERSION = 5
         private const val MAX_REQUEST_BYTES = 64 * 1_024
         private val BEARER_TOKEN_PATTERN = Regex("[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+")
         private val PROFILE_ID_PATTERN = Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}")

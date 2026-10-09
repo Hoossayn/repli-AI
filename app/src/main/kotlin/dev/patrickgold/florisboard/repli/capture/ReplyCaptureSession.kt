@@ -1,6 +1,7 @@
 package dev.patrickgold.florisboard.repli.capture
 
 import dev.patrickgold.florisboard.repli.suggestions.RemoteReplyPrivacyPolicy
+import dev.patrickgold.florisboard.repli.suggestions.ReplyIntent
 import java.util.UUID
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -28,6 +29,7 @@ data class ReplyCaptureState(
     val message: String = "Waiting for screen-sharing permission…",
     val generationError: String? = null,
     val instructions: String? = null,
+    val replyIntent: ReplyIntent = ReplyIntent.REPLY,
     val microphoneDraft: String? = null,
     val recordAfterPermission: Boolean = false,
 ) {
@@ -57,6 +59,7 @@ object ReplyCaptureSession {
             frames = if (append) previous?.frames ?: 0 else 0,
             singleView = singleView,
             instructions = previous?.instructions,
+            replyIntent = if (append) previous?.replyIntent ?: ReplyIntent.REPLY else ReplyIntent.REPLY,
             viewport = viewport,
             awaitingKeyboardReturn = viewport != null,
         ).also { mutable.value = it }
@@ -91,12 +94,13 @@ object ReplyCaptureSession {
             if (it.phase != ReplyPhase.DRAFT) return@update it
             it.copy(instructions = prepared,
                 phase = when {
-                    it.turns.isEmpty() || returnToReplies && it.replies.isNotEmpty() -> ReplyPhase.READY
+                    returnToReplies && it.replies.isNotEmpty() -> ReplyPhase.READY
                     reviewBeforeGenerate -> ReplyPhase.REVIEW
+                    it.turns.isEmpty() && it.replyIntent != ReplyIntent.FRESH_START -> ReplyPhase.READY
                     else -> ReplyPhase.CONTEXT
                 },
                 message = when {
-                    reviewBeforeGenerate && it.turns.isNotEmpty() -> "Review the chat, then generate with what you want to say"
+                    reviewBeforeGenerate -> "Review the chat, then generate with what you want to say"
                     prepared == null -> "Tap the reply icon when you're ready"
                     else -> "What you want to say is saved · tap the reply icon"
                 },
