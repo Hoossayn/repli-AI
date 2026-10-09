@@ -1,4 +1,4 @@
-name: FlorisBoard CI
+name: Repli Keyboard CI
 
 on:
   push:
@@ -40,6 +40,17 @@ jobs:
         run: sdkmanager --install "cmake;3.30.5" "ndk;26.1.10909125" "platforms;android-37.0" "build-tools;36.0.0"
       - name: Build with Gradle
         run: ./gradlew clean assembleDebug
+      - name: Run unit tests
+        run: ./gradlew :app:testDebugUnitTest --continue
+      - name: Upload unit test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: |
+            app/build/test-results/testDebugUnitTest/
+            app/build/reports/tests/testDebugUnitTest/
+          if-no-files-found: warn
       - uses: actions/upload-artifact@v4
         with:
           name: app-debug.apk
