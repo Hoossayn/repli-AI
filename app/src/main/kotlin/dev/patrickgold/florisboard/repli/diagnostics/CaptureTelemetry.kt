@@ -28,7 +28,12 @@ class CaptureTelemetry(context: Context) {
             .apply()
     }
 
+    fun recordLastField(summary: String) {
+        preferences.edit().putString(LAST_FIELD, summary.take(200)).apply()
+    }
+
     fun snapshot(): Snapshot = Snapshot(
+        lastField = preferences.getString(LAST_FIELD, null),
         capturesStarted = preferences.getInt(CAPTURE_STARTED, 0),
         captureConsentFailed = preferences.getInt(CAPTURE_CONSENT_FAILED, 0),
         framesCaptured = preferences.getInt(FRAMES_CAPTURED, 0),
@@ -57,6 +62,7 @@ class CaptureTelemetry(context: Context) {
     fun reset() = preferences.edit().clear().apply()
 
     data class Snapshot(
+        val lastField: String?,
         val capturesStarted: Int,
         val captureConsentFailed: Int,
         val framesCaptured: Int,
@@ -103,6 +109,7 @@ class CaptureTelemetry(context: Context) {
         const val REWRITE_REQUESTED = "rewrite_requested"
         const val REWRITE_FAILED = "rewrite_failed"
         const val REWRITE_APPLIED = "rewrite_applied"
+        private const val LAST_FIELD = "last_field"
         private const val PREFERENCES = "repli_capture_telemetry"
         private const val MAX_LATENCY_MS = 10 * 60 * 1_000L
     }

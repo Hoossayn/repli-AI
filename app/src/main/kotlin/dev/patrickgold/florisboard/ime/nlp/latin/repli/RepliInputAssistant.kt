@@ -1,6 +1,7 @@
 package dev.patrickgold.florisboard.ime.nlp.latin.repli
 
 import android.content.Context
+import dev.patrickgold.florisboard.repli.diagnostics.CaptureTelemetry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -67,6 +68,11 @@ class RepliInputAssistant(context: Context, private val onReady: () -> Unit) {
     fun rejectCorrection(contextBeforeWord: String, originalWord: String, privateSession: Boolean = false) {
         engine.rejectCorrection(originalWord)
         if (!privateSession) learn(contextBeforeWord, originalWord)
+    }
+
+    /** Records the last host field's kind and whether predictions applied (no text, no identifiers beyond the package). */
+    fun noteField(packageName: String?, description: String) {
+        CaptureTelemetry(appContext).recordLastField("${packageName ?: "?"} · $description")
     }
 
     /** Remembers an emoji the user inserted, so a favourite can be offered after a sentence. */

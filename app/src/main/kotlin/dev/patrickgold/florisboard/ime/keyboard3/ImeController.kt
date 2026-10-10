@@ -408,6 +408,9 @@ class ImeController(
                     newTouchLayerId = ImeLayerIds.Base
                 }
             }
+            // Content-free note of what kind of field this is, so "suggestions did not work in
+            // app X" can be read off the Diagnostics card instead of guessed.
+            repliAssistant?.noteField(info.packageName, TypingPredictionPolicy.describe(info.inputAttributes))
             val initialSelection = info.initialSelection
             val initialSurrounding = K3SurroundingText(
                 textBefore = info.getInitialTextBeforeCursor(20)?.toString() ?: "",
@@ -504,7 +507,7 @@ class ImeController(
                 isRepliAllowed(state)
             var learnedWord = word
             var appliedCorrection: WordPrediction? = null
-            if (canProcessWord && committedText == " ") {
+            if (canProcessWord && committedText == " " && TypingPredictionPolicy.allowsAutocorrect(state.editor.info)) {
                 val correction = repliAssistant?.autocorrection(state.typingContext(), privateSession = state.flags.isIncognitoMode)
                     ?.takeIf { it.removeBefore == word.length && it.removeAfter == 0 }
                 if (correction != null) {
