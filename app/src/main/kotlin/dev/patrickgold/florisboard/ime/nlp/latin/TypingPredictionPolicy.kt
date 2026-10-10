@@ -10,8 +10,10 @@ import dev.patrickgold.florisboard.ime.editor.InputAttributes
  * phonetic field. Hosts that ask for no suggestions still get them (chat apps set that flag
  * for their own reasons); hosts with their own auto-complete dropdown get them too.
  *
- * Autocorrect: a stricter subset. Fields that typically hold names, search terms or values
- * the host completes itself are left alone, because a wrong "fix" there is worse than none.
+ * Autocorrect: a stricter subset. Name and search fields are left alone, because a wrong
+ * "fix" there is worse than none. A host auto-complete dropdown does not disable it: chat
+ * composers (Tinder, Instagram and others) carry that flag for mentions and still expect
+ * normal typing help.
  */
 object TypingPredictionPolicy {
     private val proseVariations = setOf(
@@ -33,7 +35,7 @@ object TypingPredictionPolicy {
     fun allowsAutocorrect(info: FlorisEditorInfo): Boolean = allowsAutocorrect(info.inputAttributes)
 
     fun allowsAutocorrect(input: InputAttributes): Boolean =
-        allows(input) && input.variation in proseVariations && !input.flagTextAutoComplete
+        allows(input) && input.variation in proseVariations
 
     /** Null when suggestions are allowed; otherwise a short, loggable reason. */
     fun reason(input: InputAttributes): String? {

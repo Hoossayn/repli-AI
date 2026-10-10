@@ -18,10 +18,14 @@ class TypingPredictionPolicyTest {
     }
 
     @Test
-    fun `auto-complete and name or search fields get suggestions but not autocorrect`() {
+    fun `auto-complete composers get autocorrect, name and search fields only suggestions`() {
+        // Tinder's composer: text/normal+autocomplete. Chat apps use the flag for mentions.
         val autoComplete = InputAttributes.wrap(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_AUTO_COMPLETE)
         assertTrue(TypingPredictionPolicy.allows(autoComplete))
-        assertFalse(TypingPredictionPolicy.allowsAutocorrect(autoComplete))
+        assertTrue(TypingPredictionPolicy.allowsAutocorrect(autoComplete))
+        val search = InputAttributes.wrap(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_FILTER)
+        assertTrue(TypingPredictionPolicy.allows(search))
+        assertFalse(TypingPredictionPolicy.allowsAutocorrect(search))
         val name = InputAttributes.wrap(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PERSON_NAME)
         assertTrue(TypingPredictionPolicy.allows(name))
         assertFalse(TypingPredictionPolicy.allowsAutocorrect(name))
