@@ -44,6 +44,7 @@ import dev.patrickgold.florisboard.ime.keyboard3.touch.TouchModelOptions
 import dev.patrickgold.florisboard.ime.media.emoji.EmojiSuggestionType
 import dev.patrickgold.florisboard.ime.nlp.BreakIterators
 import dev.patrickgold.florisboard.ime.nlp.latin.TypingPredictionPolicy
+import dev.patrickgold.florisboard.ime.nlp.latin.repli.RepliSuggestionState
 import dev.patrickgold.florisboard.ime.nlp.latin.repli.RepliInputAssistant
 import dev.patrickgold.florisboard.ime.nlp.latin.repli.LatestPredictionWorker
 import dev.patrickgold.florisboard.ime.nlp.latin.repli.TapEvidence
@@ -116,10 +117,9 @@ class ImeController(
     )
     private var lastAutoCorrection: AutoCorrectionUndo? = null
     private val wordTouches = WordTouchHistory()
-    private val _repliSuggestions = MutableStateFlow<List<WordPrediction>>(emptyList())
-    val repliSuggestions = _repliSuggestions.asStateFlow()
-    private val _repliPredictionsActive = MutableStateFlow(false)
-    val repliPredictionsActive = _repliPredictionsActive.asStateFlow()
+    private val _repliSuggestionState = MutableStateFlow(RepliSuggestionState())
+    val repliSuggestionState = _repliSuggestionState.asStateFlow()
+    private var repliSuggestionSession: Pair<ImeEditor, Boolean>? = null
     private val assistantChanges = Channel<Unit>(Channel.CONFLATED)
     val repliAssistant = context?.let { RepliInputAssistant(it) { assistantChanges.trySend(Unit) } }
     private data class SuggestionSnapshot(
@@ -136,7 +136,7 @@ class ImeController(
                 if (suggestionWorkerIsCurrent(request) && state.editor === snapshot.editor &&
                     isRepliAllowed(state) && state.typingContext() == snapshot.context &&
                     state.flags.isIncognitoMode == snapshot.privateSession
-                ) _repliSuggestions.value = predictions
+                ) _repliSuggestionState.value = RepliSuggestionState(active = true, candidates = predictions)
             }
         },
     )
@@ -213,14 +213,23 @@ class ImeController(
 
     private fun refreshRepliSuggestions(current: ImeState) {
         val enabled = repliAssistant != null && isRepliAllowed(current)
-        _repliPredictionsActive.value = enabled
-        _repliSuggestions.value = emptyList()
+        val session = repliSuggestionSession
+        val keepCandidates = enabled && session != null && session.first === current.editor &&
+            session.second == current.flags.isIncognitoMode
+        val candidates = if (keepCandidates) _repliSuggestionState.value.candidates else emptyList()
+        _repliSuggestionState.value = RepliSuggestionState(active = enabled, pending = enabled, candidates = candidates)
+        repliSuggestionSession = if (enabled) current.editor to current.flags.isIncognitoMode else null
         if (enabled) {
             suggestionWorker.submit(SuggestionSnapshot(current.editor, current.typingContext(), current.flags.isIncognitoMode))
         } else {
             suggestionWorker.invalidate()
             repliAssistant?.forgetInputContext()
         }
+    }
+
+    private fun clearRepliSuggestionState() {
+        repliSuggestionSession = null
+        _repliSuggestionState.value = RepliSuggestionState()
     }
 
     private fun isRepliAllowed(current: ImeState): Boolean =
@@ -241,8 +250,11 @@ class ImeController(
     fun commitRepliSuggestion(prediction: WordPrediction) {
         if (repliReply?.isEditingInlineGuidance() == true) return
         updateStateBlocking {
+            val suggestions = _repliSuggestionState.value
+            if (!suggestions.active || suggestions.pending || prediction !in suggestions.candidates ||
+                !isRepliAllowed(state) || repliAssistant?.suggest(state.typingContext(), state.flags.isIncognitoMode)?.contains(prediction) != true
+            ) return@updateStateBlocking
             lastAutoCorrection = null
-            if (!isRepliAllowed(state) || repliAssistant?.suggest(state.typingContext(), state.flags.isIncognitoMode)?.contains(prediction) != true) return@updateStateBlocking
             val before = state.content.surroundingText.textBefore
             val previous = before.dropLast(prediction.removeBefore)
             replaceRepliWord(prediction)
@@ -421,6 +433,7 @@ class ImeController(
         ) {
             lastAutoCorrection = null
             wordTouches.clear()
+            clearRepliSuggestionState()
             suggestionWorker.invalidate()
             repliAssistant?.forgetInputContext()
             val newTouchLayerId: K3LayerId
@@ -549,6 +562,7 @@ class ImeController(
                 lastAutoCorrection = null
             }
             wordTouches.clear()
+            if (state.content.selection != newSelection) clearRepliSuggestionState()
             resetContent(newSelection, state.editor.getSurroundingText(50, 10))
             expectedContentQueue.push(state.content)
             refreshRepliSuggestions(state)
@@ -940,6 +954,7 @@ class ImeController(
         fun handleFinishInputView() {
             lastAutoCorrection = null
             wordTouches.clear()
+            clearRepliSuggestionState()
             suggestionWorker.invalidate()
             repliAssistant?.forgetInputContext()
             resetContent()

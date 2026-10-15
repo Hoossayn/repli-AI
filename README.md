@@ -40,6 +40,8 @@ Optional cloud replies need a backend plus Firebase public mobile config. Copy `
 
 The debug build uses the application ID `com.replyai.repli.keyboard.debug`. On an emulator, the candidate row has been checked with `teh` → `the`, including candidate selection and correction on space. Adaptive storage, its off setting, and deletion were also checked on an emulator. The updated debug keyboard has also been tested on a Pixel 10 Pro running Android 17: 30 functional checks and eight controlled typing bursts passed after fixing duplicate cursor callbacks that disrupted correction undo. Frame deadline misses remain in the debug build; optimized-build profiling is next. See [physical-device validation](docs/repli-pixel-validation.md) for measurements and limits.
 
+The follow-up [smartbar fix and measurements](docs/repli-smartbar-optimization.md) passed 222 unit tests, five physical typing bursts and 11 focused Pixel checks. It removes competing toolbar updates and retains pending candidate cells. UI work decreased in the trace, but debug frame-time results did not improve.
+
 ## Privacy and attribution
 
 Read the [Repli Keyboard privacy note](docs/repli-privacy.md). The original FlorisBoard README is kept as [upstream documentation](UPSTREAM_README.md); its store and download links refer to FlorisBoard, not Repli Keyboard.

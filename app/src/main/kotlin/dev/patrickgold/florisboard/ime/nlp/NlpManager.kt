@@ -25,6 +25,7 @@ import dev.patrickgold.florisboard.ime.clipboard.provider.ClipboardItem
 import dev.patrickgold.florisboard.ime.clipboard.provider.ItemType
 import dev.patrickgold.florisboard.ime.core.Subtype
 import dev.patrickgold.florisboard.ime.media.emoji.EmojiSuggestionProvider
+import dev.patrickgold.florisboard.ime.smartbar.SmartbarExpansionPolicy
 import dev.patrickgold.florisboard.ime.nlp.latin.LatinLanguageProvider
 import dev.patrickgold.florisboard.inferFlorisApplication
 import dev.patrickgold.florisboard.lib.util.NetworkUtils
@@ -32,6 +33,10 @@ import dev.patrickgold.florisboard.subtypeManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -86,6 +91,31 @@ class NlpManager(context: Context) {
     var debugOverlayVersion = MutableStateFlow(0)
 
     init {
+        // One writer follows the candidates actually displayed. Pending Repli work must not
+        // expand the toolbar, and legacy results must not compete with the active engine.
+        scope.launch {
+            combine(
+                activeCandidatesFlow,
+                imeController.repliSuggestionState,
+                NlpInlineAutofill.suggestions,
+                imeController.activeState.map { it.content.selection }.distinctUntilChanged(),
+                prefs.smartbar.enabled.asFlow(),
+            ) { legacy, repli, inline, selection, enabled ->
+                if (!enabled) null else SmartbarExpansionPolicy.expanded(
+                    repli = repli,
+                    hasLegacyCandidates = legacy.isNotEmpty(),
+                    hasInlineCandidates = inline.isNotEmpty(),
+                    hasSelection = selection.isNotCollapsed(),
+                )
+            }.collect { expanded ->
+                if (expanded != null && prefs.smartbar.sharedActionsExpanded.get() != expanded) {
+                    if (prefs.smartbar.sharedActionsExpandWithAnimation.get()) {
+                        prefs.smartbar.sharedActionsExpandWithAnimation.set(false)
+                    }
+                    prefs.smartbar.sharedActionsExpanded.set(expanded)
+                }
+            }
+        }
         clipboardManager.primaryClipFlow.collectLatestIn(scope) {
             assembleCandidates()
         }
@@ -293,28 +323,6 @@ class NlpManager(context: Context) {
                 else -> emptyList()
             }
             activeCandidates = candidates
-            autoExpandCollapseSmartbarActions(candidates, NlpInlineAutofill.suggestions.value)
-        }
-    }
-
-    fun autoExpandCollapseSmartbarActions(list1: List<*>?, list2: List<*>?) {
-        if (!prefs.smartbar.enabled.get()) {// || !prefs.smartbar.sharedActionsAutoExpandCollapse.get()) {
-            return
-        }
-        // TODO: this is a mess and needs to be cleaned up in v0.5 with the NLP development
-        /*if (keyboardManager.inputEventDispatcher.isRepeatableCodeLastDown()
-            && !keyboardManager.inputEventDispatcher.isPressed(KeyCode.DELETE)
-            && !keyboardManager.inputEventDispatcher.isPressed(KeyCode.FORWARD_DELETE)
-            || keyboardManager.activeState.isActionsOverflowVisible
-        ) {
-            return // We do not auto switch if a repeatable action key was last pressed or if the actions overflow
-                   // menu is visible to prevent annoying UI changes
-        }*/
-        val isSelection = imeController.snapshotState().content.selection.isNotCollapsed()
-        val isExpanded = list1.isNullOrEmpty() && list2.isNullOrEmpty() || isSelection
-        scope.launch {
-            prefs.smartbar.sharedActionsExpandWithAnimation.set(false)
-            prefs.smartbar.sharedActionsExpanded.set(isExpanded)
         }
     }
 

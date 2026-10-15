@@ -40,10 +40,12 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.UnfoldLess
 import androidx.compose.material.icons.filled.UnfoldMore
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.structuralEqualityPolicy
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -149,16 +151,23 @@ fun Smartbar() {
 private fun SmartbarMainRow(modifier: Modifier = Modifier) {
     val prefs by FlorisPreferenceStore
     val context = LocalContext.current
+    // Start the app-owned expansion observer even when the actions panel hides CandidatesRow.
+    remember(context) { context.nlpManager().value }
     val imeController = LocalImeController.current
-    val nlpManager by context.nlpManager()
     val scope = rememberCoroutineScope()
 
     val imeState by imeController.activeState.collectAsState()
-    val inlineSuggestions by NlpInlineAutofill.suggestions.collectAsState()
-    val repliSuggestions by imeController.repliSuggestions.collectAsState()
-    LaunchedEffect(inlineSuggestions, repliSuggestions) {
-        nlpManager.autoExpandCollapseSmartbarActions(repliSuggestions, inlineSuggestions)
+    // Action buttons depend on these values, not on every character or cursor position.
+    val isIncognitoMode by remember { derivedStateOf(structuralEqualityPolicy()) { imeState.flags.isIncognitoMode } }
+    val imeUiMode by remember { derivedStateOf(structuralEqualityPolicy()) { imeState.flags.imeUiMode } }
+    val editorInfo by remember { derivedStateOf(structuralEqualityPolicy()) { imeState.editor.info } }
+    val hasDraft by remember {
+        derivedStateOf(structuralEqualityPolicy()) {
+            val surrounding = imeState.content.surroundingText
+            surrounding.textBefore.isNotBlank() || surrounding.textSelected.isNotBlank() || surrounding.textAfter.isNotBlank()
+        }
     }
+    val inlineSuggestions by NlpInlineAutofill.suggestions.collectAsState()
     val shouldShowInlineSuggestionsUi = AndroidVersion.ATLEAST_API30_R && inlineSuggestions.isNotEmpty()
 
     val smartbarLayout by prefs.smartbar.layout.collectAsState()
@@ -203,7 +212,6 @@ private fun SmartbarMainRow(modifier: Modifier = Modifier) {
             }
             val incognitoIcon = ImageVector.vectorResource(id = R.drawable.ic_incognito)
             val incognitoDisplayMode = prefs.keyboard.incognitoDisplayMode.collectAsState()
-            val isIncognitoMode = imeState.flags.isIncognitoMode
             val icon = if (isIncognitoMode) {
                 when (incognitoDisplayMode.value) {
                     IncognitoDisplayMode.REPLACE_SHARED_ACTIONS_TOGGLE -> incognitoIcon
@@ -299,13 +307,13 @@ private fun SmartbarMainRow(modifier: Modifier = Modifier) {
         val arrangement by prefs.smartbar.actionArrangement.collectAsState()
         val incognitoPreference by prefs.suggestion.incognitoMode.collectAsState()
         val forceIncognito by prefs.suggestion.forceIncognitoModeFromDynamic.collectAsState()
-        val hostNoLearning = imeState.editor.info.imeOptions.flagNoPersonalizedLearning
-        val userIncognito = imeState.flags.isIncognitoMode &&
+        val hostNoLearning = editorInfo.imeOptions.flagNoPersonalizedLearning
+        val userIncognito = isIncognitoMode &&
             !(hostNoLearning && incognitoPreference == IncognitoMode.DYNAMIC_ON_OFF && !forceIncognito)
         val replyAction = QuickAction.InsertK3Descriptor(ImeActions.SuggestReplies)
-        if (imeState.flags.imeUiMode == ImeUiMode.TEXT &&
+        if (imeUiMode == ImeUiMode.TEXT &&
             !userIncognito &&
-            RepliFieldPolicy.allows(imeState.editor.info) &&
+            RepliFieldPolicy.allows(editorInfo) &&
             arrangement.stickyAction != replyAction
         ) {
             QuickActionButton(
@@ -319,11 +327,9 @@ private fun SmartbarMainRow(modifier: Modifier = Modifier) {
     fun RepliRewriteAction() {
         val arrangement by prefs.smartbar.actionArrangement.collectAsState()
         val rewriteAction = QuickAction.InsertK3Descriptor(ImeActions.RewriteText)
-        val surrounding = imeState.content.surroundingText
-        val hasDraft = surrounding.textBefore.isNotBlank() || surrounding.textSelected.isNotBlank() || surrounding.textAfter.isNotBlank()
-        if (imeState.flags.imeUiMode == ImeUiMode.TEXT &&
+        if (imeUiMode == ImeUiMode.TEXT &&
             hasDraft &&
-            RepliFieldPolicy.allows(imeState.editor.info) &&
+            RepliFieldPolicy.allows(editorInfo) &&
             arrangement.stickyAction != rewriteAction
         ) {
             QuickActionButton(

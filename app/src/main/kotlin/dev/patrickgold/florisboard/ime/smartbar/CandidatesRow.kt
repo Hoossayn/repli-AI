@@ -30,6 +30,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -72,9 +73,9 @@ fun CandidatesRow(modifier: Modifier = Modifier) {
 
     val displayMode by prefs.suggestion.displayMode.collectAsState()
     val candidates by nlpManager.activeCandidatesFlow.collectAsState()
-    val repliPredictions by imeController.repliSuggestions.collectAsState()
-    val repliPredictionsActive by imeController.repliPredictionsActive.collectAsState()
-    val visibleCandidates = if (repliPredictionsActive) {
+    val repliState by imeController.repliSuggestionState.collectAsState()
+    val repliPredictions = repliState.candidates
+    val visibleCandidates = if (repliState.active) {
         repliPredictions.map { WordSuggestionCandidate(text = it.word, isEligibleForUserRemoval = false) }
     } else candidates
     val timingOptions by interactionController.activeTimingOptions.collectAsState()
@@ -121,16 +122,18 @@ fun CandidatesRow(modifier: Modifier = Modifier) {
                             .align(Alignment.CenterVertically),
                     )
                 }
+                val usesRepli = repliState.active
+                val prediction = repliPredictions.getOrNull(n)
                 CandidateItem(
                     modifier = candidateModifier,
                     candidate = candidate,
                     displayMode = displayMode,
                     onClick = {
-                        if (repliPredictions.isNotEmpty()) {
-                            repliPredictions.getOrNull(n)?.let(imeController::commitRepliSuggestion)
+                        if (usesRepli) {
+                            prediction?.let(imeController::commitRepliSuggestion)
                         } else {
                             imeController.updateStateBlocking {
-                                emitCandidate(candidates[n])
+                                emitCandidate(candidate)
                             }
                         }
                     },
@@ -160,6 +163,9 @@ private fun CandidateItem(
     longPressTimeout: Duration,
 ) {
     var isPressed by remember { mutableStateOf(false) }
+    val currentOnClick by rememberUpdatedState(onClick)
+    val currentOnLongPress by rememberUpdatedState(onLongPress)
+    val currentLongPressTimeout by rememberUpdatedState(longPressTimeout)
 
     val elementName = if (candidate is ClipboardSuggestionCandidate) {
         FlorisImeUi.SmartbarCandidateClip
@@ -177,23 +183,26 @@ private fun CandidateItem(
             .pointerInput(Unit) {
                 awaitEachGesture {
                     val down = awaitFirstDown()
+                    // Keep the gesture bound to the word touched, even if this row slot updates.
+                    val clickAction = currentOnClick
+                    val longPressAction = currentOnLongPress
                     isPressed = true
                     if (down.pressed != down.previousPressed) down.consume()
                     var upOrCancel: PointerInputChange? = null
                     try {
-                        upOrCancel = withTimeout(longPressTimeout.inWholeMilliseconds) {
+                        upOrCancel = withTimeout(currentLongPressTimeout.inWholeMilliseconds) {
                             waitForUpOrCancellation()
                         }
                         upOrCancel?.let { if (it.pressed != it.previousPressed) it.consume() }
                     } catch (_: PointerEventTimeoutCancellationException) {
-                        if (onLongPress()) {
+                        if (longPressAction()) {
                             upOrCancel = null
                             isPressed = false
                         }
                         waitForUpOrCancellation()?.let { if (it.pressed != it.previousPressed) it.consume() }
                     }
                     if (upOrCancel != null) {
-                        onClick()
+                        clickAction()
                     }
                     isPressed = false
                 }
