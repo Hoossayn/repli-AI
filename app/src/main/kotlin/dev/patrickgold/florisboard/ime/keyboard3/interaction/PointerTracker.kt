@@ -42,6 +42,7 @@ import dev.patrickgold.florisboard.ime.keyboard3.LocalImeController
 import dev.patrickgold.florisboard.ime.keyboard3.touch.InputShiftState
 import dev.patrickgold.florisboard.ime.keyboard3.touch.TouchKey
 import dev.patrickgold.florisboard.ime.keyboard3.touch.TouchKeyboard
+import dev.patrickgold.florisboard.ime.nlp.latin.repli.TapEvidence
 import dev.patrickgold.jetpref.datastore.model.collectAsState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -59,6 +60,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.k3lp.model.K3Model
+import org.k3lp.lib.text.K3String
 import org.k3lp.model.layer.K3LayerId
 import kotlin.math.pow
 import kotlin.time.Duration
@@ -86,6 +88,7 @@ sealed interface TrackedPointer {
         override val downKey: TouchKey,
         val longPress: LongPress,
         val repeatJob: Job?,
+        val tap: TapEvidence? = null,
     ) : TrackedPointer
 }
 
@@ -188,6 +191,12 @@ class PointerTracker(
                 id = down.id,
                 down = down,
                 downKey = downKey,
+                tap = (downKey.attrs.output as? K3String)?.toText()?.singleOrNull()?.let { letter ->
+                    val position = down.position.normalized(size)
+                    val geometry = touchKeyboard.predictionKeys(downLayerId)
+                    TapEvidence.from(letter, position.x, position.y, down.uptimeMillis,
+                        geometry.hashCode().toString(), geometry)
+                },
                 longPress = if (downKey.isSuitableForPopup) {
                     val anchorBounds = downKey.bounds.let { bounds ->
                         // TODO this is only tested for PHONE_PORTRAIT, test+fix other form factors!
@@ -333,7 +342,9 @@ class PointerTracker(
                     }
                     else -> trackedPointer.downKey.attrs.output
                 }
-                output?.let { emit(it) }
+                output?.let {
+                    emitTouch(it, if (it === trackedPointer.downKey.attrs.output) trackedPointer.tap else null)
+                }
             }
             trackedPeekPointer.update { it?.copy(peekMustSwitchBack = true) }
             trackedOutputPointer.value = null

@@ -34,7 +34,7 @@ object KeyboardProximity {
      * Weighted optimal-string-alignment distance between [typed] and [candidate], capped so the
      * caller can bail out early: returns a value > [limit] as soon as it cannot stay within it.
      */
-    fun distance(typed: String, candidate: String, limit: Double = Double.MAX_VALUE): Double {
+    fun distance(typed: String, candidate: String, limit: Double = Double.MAX_VALUE, taps: List<TapEvidence?> = emptyList()): Double {
         val n = typed.length
         val m = candidate.length
         if (n == 0) return m * INSERTION
@@ -51,6 +51,7 @@ object KeyboardProximity {
                 val b = candidate[j - 1]
                 val substitute = when {
                     a == b -> 0.0
+                    taps.getOrNull(i - 1)?.typed == a -> taps[i - 1]!!.substitutionCost(b)
                     adjacent(a, b) -> ADJACENT_SUBSTITUTION
                     else -> SUBSTITUTION
                 }

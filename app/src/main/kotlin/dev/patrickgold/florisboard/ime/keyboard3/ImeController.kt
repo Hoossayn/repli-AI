@@ -45,6 +45,9 @@ import dev.patrickgold.florisboard.ime.media.emoji.EmojiSuggestionType
 import dev.patrickgold.florisboard.ime.nlp.BreakIterators
 import dev.patrickgold.florisboard.ime.nlp.latin.TypingPredictionPolicy
 import dev.patrickgold.florisboard.ime.nlp.latin.repli.RepliInputAssistant
+import dev.patrickgold.florisboard.ime.nlp.latin.repli.LatestPredictionWorker
+import dev.patrickgold.florisboard.ime.nlp.latin.repli.TapEvidence
+import dev.patrickgold.florisboard.ime.nlp.latin.repli.WordTouchHistory
 import dev.patrickgold.florisboard.ime.nlp.latin.repli.TypingContext
 import dev.patrickgold.florisboard.ime.nlp.latin.repli.WordPrediction
 import dev.patrickgold.florisboard.ime.nlp.latin.repli.WordPredictionEngine
@@ -61,6 +64,7 @@ import dev.patrickgold.florisboard.lib.devtools.flogError
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
@@ -73,6 +77,7 @@ import kotlinx.coroutines.sync.withLock
 import org.florisboard.lib.kotlin.collectIn
 import org.k3lp.lib.text.K3Descriptor
 import org.k3lp.lib.text.K3String
+import org.k3lp.lib.text.K3StringOrDescriptor
 import org.k3lp.lib.text.asK3String
 import org.k3lp.model.K3Model
 import org.k3lp.model.layer.K3LayerId
@@ -110,9 +115,34 @@ class ImeController(
         val originalWord: String,
     )
     private var lastAutoCorrection: AutoCorrectionUndo? = null
+    private val wordTouches = WordTouchHistory()
     private val _repliSuggestions = MutableStateFlow<List<WordPrediction>>(emptyList())
     val repliSuggestions = _repliSuggestions.asStateFlow()
-    val repliAssistant = context?.let { RepliInputAssistant(it) { refreshRepliSuggestions() } }
+    private val _repliPredictionsActive = MutableStateFlow(false)
+    val repliPredictionsActive = _repliPredictionsActive.asStateFlow()
+    private val assistantChanges = Channel<Unit>(Channel.CONFLATED)
+    val repliAssistant = context?.let { RepliInputAssistant(it) { assistantChanges.trySend(Unit) } }
+    private data class SuggestionSnapshot(
+        val editor: ImeEditor,
+        val context: TypingContext,
+        val privateSession: Boolean,
+    )
+    private val suggestionWorker: LatestPredictionWorker<SuggestionSnapshot, List<WordPrediction>> = LatestPredictionWorker(
+        scope,
+        compute = { snapshot -> repliAssistant?.suggest(snapshot.context, snapshot.privateSession).orEmpty() },
+        publish = { request, predictions ->
+            updateState {
+                val snapshot = request.key
+                if (suggestionWorkerIsCurrent(request) && state.editor === snapshot.editor &&
+                    isRepliAllowed(state) && state.typingContext() == snapshot.context &&
+                    state.flags.isIncognitoMode == snapshot.privateSession
+                ) _repliSuggestions.value = predictions
+            }
+        },
+    )
+
+    private fun suggestionWorkerIsCurrent(request: LatestPredictionWorker.Request<SuggestionSnapshot>) =
+        suggestionWorker.isCurrent(request)
     val repliReply = context?.let { ctx ->
         val app = ctx.applicationContext
         RepliReplyOrchestrator(
@@ -177,13 +207,20 @@ class ImeController(
         return replaced
     }
 
-    fun refreshRepliSuggestions() = refreshRepliSuggestions(activeState.value)
+    fun refreshRepliSuggestions() {
+        scope.launch { updateState { refreshRepliSuggestions(state) } }
+    }
 
     private fun refreshRepliSuggestions(current: ImeState) {
-        val assistant = repliAssistant
-        _repliSuggestions.value = if (assistant != null && isRepliAllowed(current)) {
-            assistant.suggest(current.typingContext(), privateSession = current.flags.isIncognitoMode)
-        } else emptyList()
+        val enabled = repliAssistant != null && isRepliAllowed(current)
+        _repliPredictionsActive.value = enabled
+        _repliSuggestions.value = emptyList()
+        if (enabled) {
+            suggestionWorker.submit(SuggestionSnapshot(current.editor, current.typingContext(), current.flags.isIncognitoMode))
+        } else {
+            suggestionWorker.invalidate()
+            repliAssistant?.forgetInputContext()
+        }
     }
 
     private fun isRepliAllowed(current: ImeState): Boolean =
@@ -198,6 +235,7 @@ class ImeController(
         after = content.surroundingText.textAfter.take(WordPredictionEngine.AFTER_LIMIT),
         selectionStart = content.selection.start,
         selectionEnd = content.selection.end,
+        taps = wordTouches.samples(content.surroundingText.textBefore),
     )
 
     fun commitRepliSuggestion(prediction: WordPrediction) {
@@ -293,6 +331,11 @@ class ImeController(
     val activeSmartbarVisibleDynamicActionsCount = MutableStateFlow(0)
 
     init {
+        scope.launch {
+            for (ignored in assistantChanges) {
+                updateState { refreshRepliSuggestions(state) }
+            }
+        }
         combine(
             prefs.devtools.enabled.asFlow(),
             prefs.devtools.showDragAndDropHelpers.asFlow(),
@@ -365,11 +408,21 @@ class ImeController(
     inner class UpdateImeStateScope(
         state: ImeState,
     ) : UpdateStateScope<ImeState, ImeEditor>(state) {
+        private var pendingTap: TapEvidence? = null
+
+        fun emitTouch(output: K3StringOrDescriptor, tap: TapEvidence?) {
+            pendingTap = tap
+            try { emit(output) } finally { pendingTap = null }
+        }
+
         fun handleStartInputView(
             ic: WeakReference<InputConnection>,
             info: FlorisEditorInfo,
         ) {
             lastAutoCorrection = null
+            wordTouches.clear()
+            suggestionWorker.invalidate()
+            repliAssistant?.forgetInputContext()
             val newTouchLayerId: K3LayerId
             val keyVariation: KeyVariation
             when (info.inputAttributes.type) {
@@ -479,14 +532,17 @@ class ImeController(
         }
 
         fun handleUpdateSelection(newSelection: K3TextRange) {
-            if (lastAutoCorrection?.cursor != newSelection.start || !newSelection.isCollapsed()) {
-                lastAutoCorrection = null
-            }
             val content = expectedContentQueue.popUntilOrNull { it.selection == newSelection }
             if (content != null) {
+                // Replacement and separator commits may acknowledge intermediate cursor positions.
+                // They are our own edits, so they must not discard immediate correction undo.
                 flogDebug { "DEDUPLICATED!!1" }
                 return
             }
+            if (lastAutoCorrection?.cursor != newSelection.start || !newSelection.isCollapsed()) {
+                lastAutoCorrection = null
+            }
+            wordTouches.clear()
             resetContent(newSelection, state.editor.getSurroundingText(50, 10))
             expectedContentQueue.push(state.content)
             refreshRepliSuggestions(state)
@@ -517,6 +573,7 @@ class ImeController(
                 }
             }
             super.emitText(value)
+            if (isRepliAllowed(state)) wordTouches.record(before, committedText, pendingTap) else wordTouches.clear()
             lastAutoCorrection = appliedCorrection?.let { correction ->
                 AutoCorrectionUndo(state.editor, state.content.selection.start, correction.word + committedText, word)
             }
@@ -527,6 +584,7 @@ class ImeController(
         }
 
         fun replaceRepliWord(prediction: WordPrediction) {
+            wordTouches.clear()
             val start = state.content.selection.start - prediction.removeBefore
             val end = state.content.selection.end + prediction.removeAfter
             val replacement = prediction.replacement
@@ -665,6 +723,7 @@ class ImeController(
                 state.content.selection.isCollapsed() && state.content.selection.start == undo.cursor &&
                 state.content.surroundingText.textBefore.endsWith(undo.correctedText)) {
                 val start = undo.cursor - undo.correctedText.length
+                wordTouches.clear()
                 val selection = K3TextRange(start + undo.originalWord.length, start + undo.originalWord.length)
                 state.editor.replaceText(start until undo.cursor, undo.originalWord, selection, null)
                 // Restoring the word is a rejection: stop correcting it instead of re-applying on the next space.
@@ -678,7 +737,9 @@ class ImeController(
                 refreshRepliSuggestions(state)
                 return
             }
+            val beforeDeletion = state.content.surroundingText.textBefore
             super.emitBackspace()
+            wordTouches.backspace(beforeDeletion, state.content.surroundingText.textBefore)
             expectedContentQueue.push(state.content)
             refreshRepliSuggestions(state)
         }
@@ -799,6 +860,7 @@ class ImeController(
         }
 
         override fun switchTouchLayer(newTouchLayerId: K3LayerId) {
+            wordTouches.clear()
             if (newTouchLayerId.isTextLayer()) {
                 super.switchTouchLayer(state.flags.inputShiftState.correspondingLayerId)
             } else {
@@ -871,6 +933,9 @@ class ImeController(
 
         fun handleFinishInputView() {
             lastAutoCorrection = null
+            wordTouches.clear()
+            suggestionWorker.invalidate()
+            repliAssistant?.forgetInputContext()
             resetContent()
             state = state.copy(editor = ImeEditor.Disconnected)
             expectedContentQueue.clear()

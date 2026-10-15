@@ -2,6 +2,8 @@
 
 Repli Keyboard's English suggestion and autocorrect engine runs on the device. Its bundled dictionary is part of the app. The adaptive model learns words, short word sequences and the emoji you insert only when you commit text in eligible English text fields. It does not learn from password, email address, URL, no-suggestions, or incognito fields.
 
+Touch-aware ranking keeps normalized key positions and nearby-key scores only for the current word in memory. It clears them when context, cursor, editor, or layout changes; touch samples are never saved or sent. Prediction diagnostics contain aggregate calculation counts, cache hits, and processing durations, without typed words or touch positions.
+
 The learned model is bounded and saved in encrypted storage using Android Keystore. Its file is placed in Android's no-backup directory. You can turn learning off or delete learned words in **Settings → Typing → Adaptive learning**. Turning learning off stops using and updating that model; deleting clears the saved model.
 
 The keyboard theme uses Repli's warm ivory surfaces, indigo accent (`#6654D1`), and lilac highlights so the app and keyboard stay consistent.

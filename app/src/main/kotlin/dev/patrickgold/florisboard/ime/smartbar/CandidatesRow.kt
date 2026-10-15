@@ -73,7 +73,8 @@ fun CandidatesRow(modifier: Modifier = Modifier) {
     val displayMode by prefs.suggestion.displayMode.collectAsState()
     val candidates by nlpManager.activeCandidatesFlow.collectAsState()
     val repliPredictions by imeController.repliSuggestions.collectAsState()
-    val visibleCandidates = if (repliPredictions.isNotEmpty()) {
+    val repliPredictionsActive by imeController.repliPredictionsActive.collectAsState()
+    val visibleCandidates = if (repliPredictionsActive) {
         repliPredictions.map { WordSuggestionCandidate(text = it.word, isEligibleForUserRemoval = false) }
     } else candidates
     val timingOptions by interactionController.activeTimingOptions.collectAsState()

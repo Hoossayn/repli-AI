@@ -15,6 +15,8 @@ data class AdaptiveTransition(
     val lastUsed: Long,
 )
 
+data class AdaptivePrediction(val word: String, val observations: Int, val specificContext: Boolean, val recency: Double)
+
 data class AdaptiveLanguageSnapshot(
     val sequence: Long,
     val words: List<AdaptiveCount>,
@@ -84,6 +86,30 @@ class AdaptiveLanguageModel private constructor(
 
     @Synchronized
     fun contains(word: String): Boolean = word.normalizedWord()?.let(words::containsKey) == true
+
+    @Synchronized
+    fun wordObservations(word: String): Int = word.normalizedWord()?.let { words[it]?.count } ?: 0
+
+    @Synchronized
+    fun nextWordEvidence(previousWords: List<String>, limit: Int): List<AdaptivePrediction> {
+        val context = previousWords.mapNotNull(String::normalizedWord).takeLast(2)
+        if (context.isEmpty() || limit <= 0) return emptyList()
+        val evidence = LinkedHashMap<String, AdaptivePrediction>()
+        fun offer(transition: TransitionKey, stat: Stat, specific: Boolean) {
+            val old = evidence[transition.nextWord]
+            evidence[transition.nextWord] = AdaptivePrediction(
+                transition.nextWord, maxOf(old?.observations ?: 0, stat.count),
+                specific || old?.specificContext == true,
+                maxOf(old?.recency ?: 0.0, stat.recency(sequence).toDouble() / RECENCY_WINDOW),
+            )
+        }
+        bigrams.forEach { (transition, stat) -> if (transition.context == context.last()) offer(transition, stat, false) }
+        if (context.size == 2) {
+            val pair = context.joinToString(CONTEXT_SEPARATOR)
+            trigrams.forEach { (transition, stat) -> if (transition.context == pair) offer(transition, stat, true) }
+        }
+        return evidence.values.sortedByDescending { it.observations * 10 + if (it.specificContext) 1 else 0 }.take(limit)
+    }
 
     @Synchronized
     fun nextWords(previousWords: List<String>, limit: Int): List<String> {

@@ -9,6 +9,7 @@ data class TypingContext(
     val selectionStart: Int,
     val selectionEnd: Int,
     val textLength: Int? = null,
+    val taps: List<TapEvidence?> = emptyList(),
 )
 
 data class WordPrediction(
@@ -74,6 +75,7 @@ class WordPredictionEngine {
         if (prefix.isNotEmpty() && !prefix.first().isLetter()) return emptyList()
         if (before.lastOrNull()?.isDigit() == true) return emptyList()
         val normalized = prefix.lowercase(Locale.ROOT).replace('’', '\'')
+        val preceding = previousWords(before.dropLast(prefix.length))
         val tokens = tokenPattern.findAll(before.lowercase(Locale.ROOT).replace('’', '\''))
             .map { it.value }.toList().takeLast(2)
         val sentenceStart = before.isBlank() || before.trimEnd().lastOrNull() in listOf('.', '!', '?') || before.endsWith('\n')
@@ -87,24 +89,40 @@ class WordPredictionEngine {
                     .distinct()
                     .ifEmpty { if (normalized in vocabulary) listOf(normalized) else emptyList() }
             } else {
-                val completions = (adaptive?.completions(normalized, 3).orEmpty() +
-                    loadedLexicon.completions(normalized, 6).map(LexiconWord::word))
-                    .distinctBy { it.lowercase(Locale.ROOT) }
-                    .filterNot { it.equals(normalized, ignoreCase = true) }
+                val learnedCompletions = adaptive?.completions(normalized, 3).orEmpty()
+                val completions = loadedLexicon.completions(normalized, 8)
                 // Keep the contraction visible while typing, including when the bare word is valid
                 // ("ill" → "I'll", "lets" → "let's"); the autocorrect decision is made separately.
                 val contraction = CONTRACTIONS[normalized]?.takeIf { normalized !in NEVER_SUGGEST_CONTRACTION }?.let(::listOf).orEmpty()
-                if (completions.isNotEmpty() || contraction.isNotEmpty()) contraction + completions else {
-                    val corrections = if (normalized in PROTECTED_DIALECT_WORDS) emptyList() else (
-                        adaptive?.corrections(normalized, 3).orEmpty() +
-                            loadedLexicon.corrections(normalized, 3).map(LexiconWord::word)
-                        ).distinctBy { it.lowercase(Locale.ROOT) }
-                    corrections.also {
-                        correctionWords = it.map { word -> word.lowercase(Locale.ROOT) }.toSet()
-                    }.ifEmpty {
-                        if (loadedLexicon.contains(normalized) || adaptive?.contains(normalized) == true) listOf(normalized)
-                        else emptyList()
-                    }
+                val learnedCorrections = if (normalized in PROTECTED_DIALECT_WORDS) emptyList()
+                    else adaptive?.corrections(normalized, 3).orEmpty()
+                val corrections = if (normalized in PROTECTED_DIALECT_WORDS) emptyList()
+                    else loadedLexicon.corrections(normalized, 12)
+                correctionWords = (learnedCorrections + corrections.map(LexiconWord::word))
+                    .map { it.lowercase(Locale.ROOT) }.toSet()
+                val candidates = LinkedHashMap<String, Pair<String, Double>>()
+                fun offer(word: String, score: Double) {
+                    val key = word.lowercase(Locale.ROOT)
+                    if (key == normalized) return
+                    if (score > (candidates[key]?.second ?: Double.NEGATIVE_INFINITY)) candidates[key] = word to score
+                }
+                completions.forEach { offer(it.word, candidateScore(it, preceding) - 3.0 * (it.word.length - prefix.length)) }
+                corrections.forEach { offer(it.word, candidateScore(it, preceding) - 20.0 * KeyboardProximity.distance(normalized, it.word.lowercase(Locale.ROOT), taps = context.taps)) }
+                learnedCompletions.forEach {
+                    val repeated = (adaptive?.wordObservations(it) ?: 0) >= 2
+                    offer(it, candidateScore(LexiconWord(it, 130), preceding) + if (repeated) 600.0 else 60.0)
+                }
+                learnedCorrections.forEach { offer(it, candidateScore(LexiconWord(it, 130), preceding) - 20.0) }
+                contraction.forEach { offer(it, 1_000.0) }
+                val ranked = candidates.values.sortedByDescending { it.second }.map { it.first }
+                val completionKeys = (completions.map(LexiconWord::word) + learnedCompletions + contraction)
+                    .map { it.lowercase(Locale.ROOT) }.toSet()
+                val bestCompletion = ranked.firstOrNull { it.lowercase(Locale.ROOT) in completionKeys }
+                val balanced = if (bestCompletion != null && bestCompletion !in ranked.take(3)) {
+                    ranked.take(2) + bestCompletion + ranked.drop(2).filterNot { it == bestCompletion }
+                } else ranked
+                balanced.ifEmpty {
+                    if (loadedLexicon.contains(normalized) || adaptive?.contains(normalized) == true) listOf(normalized) else emptyList()
                 }
             }
         } else if (sentenceStart) {
@@ -143,31 +161,36 @@ class WordPredictionEngine {
     }
 
     /**
-     * Next-word candidates merged by score. Tiers, highest first: the user's own adaptive model,
-     * the chat corpus prior (trigram over bigram, by count), Repli's hand-written phrase hints,
-     * the dictionary's next-word column, and finally generic fillers.
+     * Next-word candidates blend personal observation strength, contextual specificity and
+     * recency with the corpus prior. Phrase hints, dictionary entries and generic fillers
+     * provide lower-scoring fallbacks. Scores are ranking heuristics, not probabilities.
      */
     private fun nextWordCandidates(tokens: List<String>, includeAdaptive: Boolean): List<String> {
-        val scores = LinkedHashMap<String, Long>()
-        fun offer(word: String, score: Long) {
+        val scores = LinkedHashMap<String, Double>()
+        fun offer(word: String, score: Double) {
             val key = word.lowercase(Locale.ROOT)
             if (key.isEmpty()) return
-            scores[key] = maxOf(scores[key] ?: 0L, score)
+            scores[key] = maxOf(scores[key] ?: 0.0, score)
         }
-        adaptiveModel.takeIf { adaptiveEnabled && includeAdaptive }?.nextWords(tokens, 3).orEmpty()
-            .forEachIndexed { index, word -> offer(word, ADAPTIVE_TIER - index * 1_000_000L) }
+        adaptiveModel.takeIf { adaptiveEnabled && includeAdaptive }?.nextWordEvidence(tokens, 5).orEmpty()
+            .forEach { candidate ->
+                val score = if (candidate.observations < 2) 40.0 + candidate.recency * 10.0 else
+                    200.0 + 120.0 * kotlin.math.ln(1.0 + candidate.observations) +
+                        (if (candidate.specificContext) 50.0 else 0.0) + candidate.recency * 20.0
+                offer(candidate.word, score)
+            }
         chatModel?.nextWords(tokens, 5).orEmpty()
-            .forEach { candidate -> offer(candidate.word, CHAT_TIER + candidate.count) }
+            .forEach { candidate -> offer(candidate.word, 100.0 + (chatModel?.contextScore(tokens, candidate.word) ?: 0.0)) }
         (phrases[tokens.joinToString(" ")] ?: phrases[tokens.lastOrNull()]).orEmpty()
-            .forEachIndexed { index, word -> offer(word, PHRASE_TIER - index * 100L) }
+            .forEachIndexed { index, word -> offer(word, 30.0 - index) }
         lexicon?.nextWords(tokens.lastOrNull().orEmpty(), 3).orEmpty()
-            .forEachIndexed { index, word -> offer(word.word, LEXICON_TIER - index) }
-        listOf("the", "and", "to").forEachIndexed { index, word -> offer(word, 3L - index) }
+            .forEachIndexed { index, word -> offer(word.word, 20.0 - index) }
+        listOf("the", "and", "to").forEachIndexed { index, word -> offer(word, 3.0 - index) }
         return scores.entries.sortedByDescending { it.value }.map { it.key }
     }
 
     /** Returns only high-confidence, one-edit corrections suitable for committing on a separator. */
-    fun autocorrection(context: TypingContext, includeAdaptive: Boolean = true): WordPrediction? {
+    fun autocorrection(context: TypingContext, includeAdaptive: Boolean = true, allowFuzzy: Boolean = true): WordPrediction? {
         if (context.selectionStart < 0 || context.selectionStart != context.selectionEnd || context.after.firstOrNull()?.let(::wordCharacter) == true) {
             return null
         }
@@ -198,7 +221,10 @@ class WordPredictionEngine {
         if (loadedLexicon.contains(normalized)) return null
         // "yeahh", "helloo", "okk": a real word stretched for emphasis is not a typo.
         if (isElongation(normalized, loadedLexicon)) return null
-        val best = rankForChat(loadedLexicon.corrections(normalized, 5))
+        val preceding = previousWords(context.before.dropLast(prefix.length))
+        val best = loadedLexicon.corrections(normalized, 12).sortedByDescending {
+            candidateScore(it, preceding) - 20.0 * KeyboardProximity.distance(normalized, it.word.lowercase(Locale.ROOT), taps = context.taps)
+        }
         val winner = best.firstOrNull()
         if (winner != null) {
             // One edit is one edit: single-edit typos share the transposition confidence bar.
@@ -207,11 +233,18 @@ class WordPredictionEngine {
             val confident = winner.frequency >= CONFIDENT_FREQUENCY ||
                 winner.word.lowercase(Locale.ROOT) in ALWAYS_CORRECT
             if (!confident) return null
+            val runnerUp = best.getOrNull(1)
+            if (runnerUp != null && winner.word.lowercase(Locale.ROOT) !in ALWAYS_CORRECT) {
+                fun score(word: LexiconWord) = candidateScore(word, preceding) -
+                    20.0 * KeyboardProximity.distance(normalized, word.word.lowercase(Locale.ROOT), taps = context.taps)
+                if (score(winner) - score(runnerUp) < 8.0) return null
+            }
             val display = preserveCase(winner.word, prefix, sentenceStart = false)
             return WordPrediction(display, prefix.length, 0, space = false, correction = true)
         }
         // Nothing within one edit: try two keyboard-aware edits, but only with a clear winner.
-        val fuzzy = loadedLexicon.fuzzyCorrections(normalized, 2)
+        if (!allowFuzzy) return null
+        val fuzzy = loadedLexicon.fuzzyCorrections(normalized, 2, context.taps)
         val top = fuzzy.firstOrNull() ?: return null
         val runnerUp = fuzzy.getOrNull(1)
         if (top.frequency < CONFIDENT_FREQUENCY) return null
@@ -220,13 +253,15 @@ class WordPredictionEngine {
     }
 
     /** Candidates re-ranked by how common they are in chat, so "thnks" becomes "thanks", not "tanks". */
-    private fun rankForChat(candidates: List<LexiconWord>): List<LexiconWord> {
-        val chat = chatModel ?: return candidates
-        if (candidates.size < 2) return candidates
-        return candidates.sortedByDescending { candidate ->
-            candidate.frequency + CHAT_RANK_WEIGHT * kotlin.math.ln(1.0 + chat.chatCount(candidate.word))
-        }
-    }
+    private fun candidateScore(candidate: LexiconWord, preceding: List<String>): Double =
+        candidate.frequency + (chatModel?.let { chat ->
+            CHAT_RANK_WEIGHT * kotlin.math.ln(1.0 + chat.chatCount(candidate.word)) +
+                chat.contextScore(preceding, candidate.word)
+        } ?: 0.0)
+
+    private fun previousWords(text: String): List<String> = tokenPattern
+        .findAll(text.lowercase(Locale.ROOT).replace('’', '\''))
+        .map { it.value }.toList().takeLast(2)
 
     private fun isElongation(normalized: String, loadedLexicon: KeyboardLexicon): Boolean {
         if (normalized.length < 3) return false
@@ -270,10 +305,6 @@ class WordPredictionEngine {
         const val AFTER_LIMIT = 48
         private const val CONFIDENT_FREQUENCY = 110
         private const val MAX_REJECTED = 256
-        private const val ADAPTIVE_TIER = 1_000_000_000L
-        private const val CHAT_TIER = 10_000_000L
-        private const val PHRASE_TIER = 10_000L
-        private const val LEXICON_TIER = 1_000L
         private val SENTENCE_END = setOf('.', '!', '?', ':', '"', '“', '(', '[', '-', '—', '–')
         private fun wordCharacter(c: Char) = c.isLetter() || c == '\'' || c == '’'
         fun isProtectedDialectWord(word: String): Boolean =

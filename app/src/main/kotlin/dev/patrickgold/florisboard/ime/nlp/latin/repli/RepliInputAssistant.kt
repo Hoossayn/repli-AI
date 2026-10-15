@@ -1,6 +1,7 @@
 package dev.patrickgold.florisboard.ime.nlp.latin.repli
 
 import android.content.Context
+import android.os.Trace
 import dev.patrickgold.florisboard.repli.diagnostics.CaptureTelemetry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -23,6 +24,13 @@ class RepliInputAssistant(context: Context, private val onReady: () -> Unit) {
     @Volatile private var model = AdaptiveLanguageModel()
     @Volatile private var ready = false
     private var saveJob: Job? = null
+    private val predictionCache = PredictionCache(
+        predict = { context, private -> engine.suggest(context, includeAdaptive = !private) },
+        correct = { context, private -> engine.autocorrection(context, includeAdaptive = !private) },
+        fastCorrect = { context, private -> engine.autocorrection(context, includeAdaptive = !private, allowFuzzy = false) },
+    )
+    val predictionMetrics: PredictionMetrics.Snapshot get() = predictionCache.metrics.snapshot()
+    fun resetPredictionMetrics() = predictionCache.metrics.reset()
 
     init {
         engine.setAdaptiveEnabled(preferences.enabled)
@@ -37,14 +45,15 @@ class RepliInputAssistant(context: Context, private val onReady: () -> Unit) {
                         supplements.forEach { it.close() }
                     }
                 }
-            }.onSuccess(engine::installLexicon)
+            }.onSuccess { engine.installLexicon(it); predictionCache.invalidate() }
             runCatching {
                 appContext.assets.open("ime/dict/repli-en_chat.ngrams").use(ChatNgramModel::load)
-            }.onSuccess(engine::installChatModel)
+            }.onSuccess { engine.installChatModel(it); predictionCache.invalidate() }
             val loaded = fileMutex.withLock { repository.load() }
             if (initialRevision == preferences.revision) {
                 model = loaded
                 engine.installAdaptiveModel(loaded)
+                predictionCache.invalidate()
             }
             ready = true
             onReady()
@@ -52,14 +61,16 @@ class RepliInputAssistant(context: Context, private val onReady: () -> Unit) {
     }
 
     fun suggest(context: TypingContext, privateSession: Boolean = false): List<WordPrediction> {
-        val correction = engine.autocorrection(context, includeAdaptive = !privateSession)?.copy(space = true)
-        return (listOfNotNull(correction) + engine.suggest(context, includeAdaptive = !privateSession))
-            .distinctBy { it.word.lowercase() }
-            .take(3)
+        Trace.beginSection("Repli.wordSuggestions")
+        return try { predictionCache.suggestions(context, privateSession) } finally { Trace.endSection() }
     }
 
-    fun autocorrection(context: TypingContext, privateSession: Boolean = false): WordPrediction? =
-        engine.autocorrection(context, includeAdaptive = !privateSession)
+    fun autocorrection(context: TypingContext, privateSession: Boolean = false): WordPrediction? {
+        Trace.beginSection("Repli.wordCorrection")
+        return try { predictionCache.autocorrection(context, privateSession) } finally { Trace.endSection() }
+    }
+
+    fun forgetInputContext() = predictionCache.invalidate()
 
     /**
      * The user undid an autocorrection. The word is never corrected again this session, and when
@@ -67,6 +78,7 @@ class RepliInputAssistant(context: Context, private val onReady: () -> Unit) {
      */
     fun rejectCorrection(contextBeforeWord: String, originalWord: String, privateSession: Boolean = false) {
         engine.rejectCorrection(originalWord)
+        predictionCache.invalidate()
         if (!privateSession) learn(contextBeforeWord, originalWord)
     }
 
@@ -78,18 +90,19 @@ class RepliInputAssistant(context: Context, private val onReady: () -> Unit) {
     /** Remembers an emoji the user inserted, so a favourite can be offered after a sentence. */
     fun learnEmoji(emoji: String) {
         if (!ready || !preferences.enabled) return
-        if (model.recordEmoji(emoji)) scheduleSave()
+        if (model.recordEmoji(emoji)) { predictionCache.invalidate(); scheduleSave() }
     }
 
     fun learn(contextBeforeWord: String, committedWord: String) {
         if (!ready || !preferences.enabled) return
         val previous = WORD.findAll(contextBeforeWord.lowercase()).map { it.value }.toList().takeLast(2)
-        if (model.observe(previous, committedWord)) scheduleSave()
+        if (model.observe(previous, committedWord)) { predictionCache.invalidate(); scheduleSave() }
     }
 
     fun setLearningEnabled(enabled: Boolean) {
         preferences.enabled = enabled
         engine.setAdaptiveEnabled(enabled)
+        predictionCache.invalidate()
         onReady()
     }
 
@@ -99,6 +112,7 @@ class RepliInputAssistant(context: Context, private val onReady: () -> Unit) {
         preferences.markCleared()
         saveJob?.cancel()
         model = AdaptiveLanguageModel().also(engine::installAdaptiveModel)
+        predictionCache.invalidate()
         scope.launch { fileMutex.withLock { repository.clear() } }
         onReady()
     }

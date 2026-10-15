@@ -22,6 +22,7 @@ import androidx.compose.ui.geometry.Size
 import dev.patrickgold.florisboard.ime.keyboard3.ImeActions
 import dev.patrickgold.florisboard.ime.keyboard3.ImeLayerIds
 import dev.patrickgold.florisboard.ime.keyboard3.hint.LongPressKeyHintPlacement
+import dev.patrickgold.florisboard.ime.nlp.latin.repli.TapKey
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -67,6 +68,17 @@ class TouchKeyboard(
     val rowCount: Int,
     val minDeviceWidthMm: Int,
 ) {
+    private val tapGeometry = mutableMapOf<K3LayerId, List<TapKey>>()
+
+    @Synchronized fun predictionKeys(layerId: K3LayerId): List<TapKey> = tapGeometry.getOrPut(layerId) {
+        val layer = layers[layerId] ?: if (layerId == ImeLayerIds.Caps) layers[ImeLayerIds.Shift] ?: layers[ImeLayerIds.Base] else layers[ImeLayerIds.Base]
+        layer?.keys.orEmpty().mapNotNull { key ->
+            val letter = (key.attrs.output as? K3String)?.toText()?.singleOrNull()?.takeIf { it.isLetter() }
+                ?: return@mapNotNull null
+            TapKey(letter.lowercaseChar(), key.bounds.center.x, key.bounds.center.y, key.bounds.width, key.bounds.height)
+        }
+    }
+
     fun findKey(layerId: K3LayerId, position: Offset): TouchKey? {
         val layer = if (layerId == ImeLayerIds.Caps) {
             layers[layerId] ?: layers[ImeLayerIds.Shift] ?: layers[ImeLayerIds.Base]

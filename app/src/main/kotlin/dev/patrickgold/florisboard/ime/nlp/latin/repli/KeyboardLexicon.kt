@@ -19,6 +19,7 @@ interface KeyboardLexicon {
 
     /** Two-edit, keyboard-aware candidates for words the one-edit index cannot fix. */
     fun fuzzyCorrections(word: String, limit: Int): List<FuzzyCorrection> = emptyList()
+    fun fuzzyCorrections(word: String, limit: Int, taps: List<TapEvidence?>): List<FuzzyCorrection> = fuzzyCorrections(word, limit)
 }
 
 /**
@@ -99,21 +100,26 @@ class BundledKeyboardLexicon private constructor(
      * typed length, scoring them with the weighted keyboard distance. Only run on a separator
      * for words of five letters or more; the scan is a few thousand short DP tables at most.
      */
-    override fun fuzzyCorrections(word: String, limit: Int): List<FuzzyCorrection> {
+    override fun fuzzyCorrections(word: String, limit: Int): List<FuzzyCorrection> = fuzzyCorrections(word, limit, emptyList())
+
+    override fun fuzzyCorrections(word: String, limit: Int, taps: List<TapEvidence?>): List<FuzzyCorrection> {
         val query = word.normalized()
         if (query.length < MIN_FUZZY_LENGTH || query.length > MAX_CORRECTION_LENGTH || limit <= 0) return emptyList()
-        val first = query.first()
+        val firstLetters = (listOf(query.first()) + taps.firstOrNull()?.takeIf { it.typed == query.first() }
+            ?.alternatives.orEmpty().map { it.letter }).distinct()
         val best = ArrayList<FuzzyCorrection>()
-        var index = lowerBound(first.toString())
-        while (index < entries.size) {
-            val entry = entries[index++]
-            if (entry.normalized.firstOrNull() != first) break
-            if (entry.completionOnly || entry.frequency < CORRECTION_FREQUENCY_FLOOR) continue
-            if (kotlin.math.abs(entry.normalized.length - query.length) > 1) continue
-            if (entry.normalized == query) continue
-            val cost = KeyboardProximity.distance(query, entry.normalized, MAX_FUZZY_COST)
-            if (cost > MAX_FUZZY_COST) continue
-            best.add(FuzzyCorrection(entry.word, entry.frequency, cost))
+        for (first in firstLetters) {
+            var index = lowerBound(first.toString())
+            while (index < entries.size) {
+                val entry = entries[index++]
+                if (entry.normalized.firstOrNull() != first) break
+                if (entry.completionOnly || entry.frequency < CORRECTION_FREQUENCY_FLOOR) continue
+                if (kotlin.math.abs(entry.normalized.length - query.length) > 1) continue
+                if (entry.normalized == query) continue
+                val cost = KeyboardProximity.distance(query, entry.normalized, MAX_FUZZY_COST, taps)
+                if (cost > MAX_FUZZY_COST) continue
+                best.add(FuzzyCorrection(entry.word, entry.frequency, cost))
+            }
         }
         return best.sortedWith(compareBy<FuzzyCorrection> { it.cost }.thenByDescending { it.frequency }.thenBy { it.word.length })
             .take(limit)

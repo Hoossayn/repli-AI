@@ -39,10 +39,12 @@ import dev.patrickgold.florisboard.repli.data.RemoteGenerationPreferences
 import dev.patrickgold.florisboard.repli.diagnostics.CaptureTelemetry
 import dev.patrickgold.florisboard.repli.diagnostics.CrashReportingPreferences
 import dev.patrickgold.florisboard.repli.diagnostics.RepliCrashReporting
+import dev.patrickgold.florisboard.imeController
 
 @Composable
 fun RepliSettingsScreen() {
     val context = LocalContext.current
+    val keyboard by context.imeController()
     val navController = LocalNavController.current
     val account by RepliFirebaseAccountManager.state.collectAsState()
     val remote = remember(context) { RemoteGenerationPreferences(context) }
@@ -54,6 +56,7 @@ fun RepliSettingsScreen() {
     var crashReportsEnabled by remember { mutableStateOf(CrashReportingPreferences(context).enabled) }
     val telemetry = remember(context) { CaptureTelemetry(context) }
     var diagnostics by remember { mutableStateOf(telemetry.snapshot()) }
+    var typingMetrics by remember { mutableStateOf(keyboard.repliAssistant?.predictionMetrics) }
     var notificationEnabled by remember { mutableStateOf(hasNotificationAccess(context)) }
     var accessibilityEnabled by remember { mutableStateOf(hasCaptureAccessibility(context)) }
     var cloudDisclosure by remember { mutableStateOf(false) }
@@ -65,6 +68,7 @@ fun RepliSettingsScreen() {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 diagnostics = telemetry.snapshot()
+                typingMetrics = keyboard.repliAssistant?.predictionMetrics
                 notificationEnabled = hasNotificationAccess(context)
                 accessibilityEnabled = hasCaptureAccessibility(context)
                 cloudEnabled = remote.enabled
@@ -236,7 +240,7 @@ fun RepliSettingsScreen() {
         RepliCard {
             RepliLabel("Diagnostics", 17, RepliStyle.ink, bold = true)
             Spacer(Modifier.height(8.dp))
-            RepliLabel("Counts only, kept on this phone, never uploaded. Useful when a capture or reply does not work as expected.", 14, RepliStyle.muted)
+            RepliLabel("Local counters for typing and replies. No typed words are included, and these numbers are never uploaded.", 14, RepliStyle.muted)
             Spacer(Modifier.height(10.dp))
             RepliLabel(
                 "Captures started ${diagnostics.capturesStarted} · screen-share not opened ${diagnostics.captureConsentFailed} · frames ${diagnostics.framesCaptured}\n" +
@@ -250,9 +254,20 @@ fun RepliSettingsScreen() {
                 13, RepliStyle.muted,
             )
             Spacer(Modifier.height(10.dp))
+            typingMetrics?.let { timing ->
+                RepliLabel(
+                    "Typing calculations ${timing.suggestionComputations + timing.correctionComputations} · reused results ${timing.cacheHits}\n" +
+                        "Recent processing p95 ${timing.recentP95Micros} µs · slowest ${timing.worstMicros} µs\n" +
+                        "Since the keyboard process started. Processing time only, not touch-to-screen delay.",
+                    13, RepliStyle.muted,
+                )
+            }
+            Spacer(Modifier.height(10.dp))
             RepliAction("Reset counters", {
                 telemetry.reset()
+                keyboard.repliAssistant?.resetPredictionMetrics()
                 diagnostics = telemetry.snapshot()
+                typingMetrics = keyboard.repliAssistant?.predictionMetrics
             }, filled = false)
         }
     }

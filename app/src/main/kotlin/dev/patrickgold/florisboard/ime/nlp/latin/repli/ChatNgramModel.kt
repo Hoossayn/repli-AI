@@ -8,8 +8,8 @@ import java.util.zip.GZIPInputStream
  * Static next-word prior built from a conversational corpus (see utils/build_chat_ngrams.py).
  *
  * Read-only and fully offline. It answers two questions: which words commonly start a message,
- * and which word commonly follows the last one or two words. The user's own adaptive model
- * always outranks it; this only fills in when the user has not typed a phrase before.
+ * and which word commonly follows the last one or two words. The prediction engine blends this prior with the strength and recency of the user's
+ * adaptive evidence. One personal observation does not automatically displace the prior.
  */
 class ChatNgramModel private constructor(
     private val starts: List<ScoredWord>,
@@ -23,6 +23,19 @@ class ChatNgramModel private constructor(
 
     /** How often [word] appears in chat messages; 0 when unseen. Used to rank corrections. */
     fun chatCount(word: String): Int = unigrams[word.normalized()] ?: 0
+
+    /** Relative support among the retained candidates, not a calibrated language probability. */
+    fun contextScore(previousWords: List<String>, word: String): Double {
+        val context = previousWords.map { it.normalized() }.takeLast(2)
+        val candidate = word.normalized()
+        fun share(entries: List<ScoredWord>): Double {
+            val count = entries.firstOrNull { it.word == candidate }?.count ?: return 0.0
+            return count.toDouble() / (entries.maxOfOrNull { it.count } ?: 1).coerceAtLeast(1)
+        }
+        val bigram = context.lastOrNull()?.let { share(bigrams[it].orEmpty()) } ?: 0.0
+        val trigram = if (context.size == 2) share(trigrams[context.joinToString(" ")].orEmpty()) else 0.0
+        return 80.0 * bigram + 120.0 * trigram
+    }
 
     /**
      * Candidates after [previousWords] (oldest first). Standard back-off: every trigram candidate

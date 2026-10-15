@@ -4,8 +4,9 @@ Repli Keyboard is an Android keyboard built from [FlorisBoard](https://github.co
 
 ## What works
 
-- Word completions and next-word suggestions in eligible English text fields. Next words come, in order of trust, from your own adaptive model, a chat-corpus n-gram prior (trigram over bigram), Repli's phrase hints, and the dictionary; message openers come from the corpus.
-- Candidate-tap replacement and autocorrect when a space is pressed.
+- Word completions and next-word suggestions in eligible English text fields. Next words blend repeated personal usage with a chat-corpus n-gram prior, Repli's phrase hints, and the dictionary; a single personal observation does not displace a strong corpus suggestion. Message openers come from the corpus.
+- Candidate-tap replacement and autocorrect when a space is pressed. Completions and corrections compete using preceding words and real key-touch positions, with a confidence margin before automatic replacement.
+- Background suggestion work keeps only the latest pending input, rejects stale results, and reuses completed predictions for candidate validation and space correction. Settings diagnostics show aggregate processing times and cache reuse without recording typed text.
 - A bounded adaptive model for committed words and short phrases. It is encrypted with Android Keystore and stored in the app's no-backup directory.
 - A **Typing → Adaptive learning** setting to stop learning or clear saved words. Password, email address, URL, no-suggestions, and incognito fields are excluded.
 - A first-run **Repli account** page with Google, Apple, and email sign-in through Firebase. You can continue without an account to use the on-device keyboard. Cloud replies stay off unless the build is configured and you sign in; network is used to exchange the sign-in for a short-lived session and to send captured text you explicitly approve to your first-party backend.
