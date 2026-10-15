@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import dev.patrickgold.florisboard.app.FlorisPreferenceStore
 import dev.patrickgold.florisboard.ime.keyboard3.LocalImeController
 import dev.patrickgold.florisboard.ime.keyboard3.interaction.LocalInteractionController
+import dev.patrickgold.florisboard.ime.keyboard3.ui.traceImeRender
 import dev.patrickgold.florisboard.ime.nlp.ClipboardSuggestionCandidate
 import dev.patrickgold.florisboard.ime.nlp.SuggestionCandidate
 import dev.patrickgold.florisboard.ime.nlp.WordSuggestionCandidate
@@ -63,7 +64,7 @@ import kotlin.time.Duration
 val CandidatesRowScrollbarHeight = 2.dp
 
 @Composable
-fun CandidatesRow(modifier: Modifier = Modifier) {
+fun CandidatesRow(modifier: Modifier = Modifier) = traceImeRender("Repli.compose.candidates") {
     val prefs by FlorisPreferenceStore
     val imeController = LocalImeController.current
     val interactionController = LocalInteractionController.current

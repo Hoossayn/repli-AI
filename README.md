@@ -44,6 +44,8 @@ The follow-up [smartbar fix and measurements](docs/repli-smartbar-optimization.m
 
 The [optimized-build profile](docs/repli-optimized-rendering-profile.md) now establishes a release-derived baseline: 7/1,097 missed deadlines across six untraced Pixel typing runs, with per-run frame-time p95 of 10–12 ms. The next rendering target is the first-character recomposition/layout work; these fresh-package results are not a controlled before/after comparison.
 
+The [first-character rendering follow-up](docs/repli-first-character-rendering.md) reuses unchanged key geometry and moves label fitting into layout. Matched trials show less repeated layout work; the longest first-character UI frame remains around 14 ms. The change passed 222 unit tests and physical-device interaction checks.
+
 ## Privacy and attribution
 
 Read the [Repli Keyboard privacy note](docs/repli-privacy.md). The original FlorisBoard README is kept as [upstream documentation](UPSTREAM_README.md); its store and download links refer to FlorisBoard, not Repli Keyboard.

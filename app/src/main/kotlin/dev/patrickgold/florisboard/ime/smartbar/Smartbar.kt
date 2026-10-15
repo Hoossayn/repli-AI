@@ -63,6 +63,7 @@ import dev.patrickgold.florisboard.ime.ImeUiMode
 import dev.patrickgold.florisboard.ime.keyboard.FlorisImeSizing
 import dev.patrickgold.florisboard.ime.keyboard3.LocalImeController
 import dev.patrickgold.florisboard.ime.keyboard3.ImeActions
+import dev.patrickgold.florisboard.ime.keyboard3.ui.traceImeRender
 import dev.patrickgold.florisboard.ime.keyboard.IncognitoMode
 import dev.patrickgold.florisboard.repli.ime.RepliFieldPolicy
 import dev.patrickgold.florisboard.ime.nlp.NlpInlineAutofill
@@ -148,7 +149,7 @@ fun Smartbar() {
 }
 
 @Composable
-private fun SmartbarMainRow(modifier: Modifier = Modifier) {
+private fun SmartbarMainRow(modifier: Modifier = Modifier) = traceImeRender("Repli.compose.smartbar") {
     val prefs by FlorisPreferenceStore
     val context = LocalContext.current
     // Start the app-owned expansion observer even when the actions panel hides CandidatesRow.

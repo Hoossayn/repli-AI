@@ -72,7 +72,7 @@ import org.k3lp.lib.text.asK3String
 @Composable
 fun ImeKeyboardBox(
     modifier: Modifier = Modifier,
-) {
+) = traceImeRender("Repli.compose.keyboard") {
     val prefs by FlorisPreferenceStore
     val density = LocalDensity.current
     val imeController = LocalImeController.current
@@ -205,6 +205,23 @@ fun ImeKeyboardBox(
                         trackedMultiTapSeq?.takeIf { it.touchKey == touchKey }?.multiTapIndex ?: -1
                     }
                 }
+                // A case change replaces TouchKey, but usually leaves its geometry unchanged.
+                // Observe bounds here so layout does not subscribe to the whole key object.
+                val bounds = touchKey.bounds
+                val keyModifier = remember(bounds) {
+                    Modifier.layout { measurable, constraints ->
+                        val keySize = visibleTouchKeySize(
+                            constraints.maxWidth, constraints.maxHeight,
+                            bounds.width, bounds.height, keyMarginHPx, keyMarginVPx,
+                        )
+                        val placeable = measurable.measure(Constraints.fixed(keySize.width, keySize.height))
+                        val offset = IntOffset(
+                            x = (constraints.maxWidth * bounds.topLeft.x + keyMarginHPx).fastRoundToInt(),
+                            y = (constraints.maxHeight * bounds.topLeft.y + keyMarginVPx).fastRoundToInt(),
+                        )
+                        layout(placeable.width, placeable.height) { placeable.place(offset) }
+                    }
+                }
                 ImeKeyboardKeyBox(
                     touchKey = touchKey,
                     displayOverride = when {
@@ -214,24 +231,7 @@ fun ImeKeyboardBox(
                     isPressed = isPressed,
                     longPress = longPress,
                     multiTapIndex = multiTapIndex,
-                    modifier = Modifier
-                        .layout { measurable, constraints ->
-                            val keySize = visibleTouchKeySize(
-                                constraints.maxWidth, constraints.maxHeight,
-                                touchKey.bounds.width, touchKey.bounds.height,
-                                keyMarginHPx, keyMarginVPx,
-                            )
-                            val effConstraints = Constraints.fixed(
-                                width = keySize.width,
-                                height = keySize.height,
-                            )
-                            val placeable = measurable.measure(effConstraints)
-                            val offset = IntOffset(
-                                x = (constraints.maxWidth * touchKey.bounds.topLeft.x + keyMarginHPx).fastRoundToInt(),
-                                y = (constraints.maxHeight * touchKey.bounds.topLeft.y + keyMarginVPx).fastRoundToInt(),
-                            )
-                            layout(placeable.width, placeable.height) { placeable.place(offset) }
-                        },
+                    modifier = keyModifier,
                 )
                 if (devtoolsEnabled && debugShowTouchBoundaries) {
                     Box(
@@ -272,7 +272,7 @@ private fun ImeKeyboardKeyBox(
     longPress: LongPress,
     multiTapIndex: Int,
     modifier: Modifier = Modifier,
-) {
+) = traceImeRender("Repli.compose.key") {
     val display = displayOverride ?: touchKey.display
     val output = touchKey.attrs.output
     val attributes: SnyggQueryAttributes = remember(output) {
