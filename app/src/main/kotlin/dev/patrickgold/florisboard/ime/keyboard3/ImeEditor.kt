@@ -29,6 +29,7 @@ import dev.patrickgold.florisboard.ime.clipboard.provider.ClipboardFileStorage
 import dev.patrickgold.florisboard.ime.clipboard.provider.ClipboardItem
 import dev.patrickgold.florisboard.ime.editor.FlorisEditorInfo
 import dev.patrickgold.florisboard.ime.editor.ImeOptions
+import org.florisboard.lib.android.AndroidVersion
 import org.k3lp.runtime.K3Editor
 import org.k3lp.runtime.K3SurroundingText
 import org.k3lp.runtime.K3TextRange
@@ -61,6 +62,17 @@ open class ImeEditor(
             textBefore = textBeforeCursor.toString(),
             textSelected = textSelected.toString(),
             textAfter = textAfterCursor.toString(),
+        )
+    }
+
+    /** A coherent absolute cursor snapshot, or null for older/unsupported input connections. */
+    fun currentSelectionOrNull(): K3TextRange? {
+        if (!AndroidVersion.ATLEAST_API31_S) return null
+        val surrounding = ic.get()?.getSurroundingText(0, 0, 0) ?: return null
+        if (surrounding.offset < 0 || surrounding.selectionStart < 0 || surrounding.selectionEnd < 0) return null
+        return K3TextRange(
+            start = surrounding.offset + surrounding.selectionStart,
+            end = surrounding.offset + surrounding.selectionEnd,
         )
     }
 

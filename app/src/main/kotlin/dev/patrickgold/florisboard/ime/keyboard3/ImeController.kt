@@ -106,7 +106,7 @@ class ImeController(
     private val prefs by FlorisPreferenceStore
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private val breakIterators = BreakIterators()
-    private val expectedContentQueue = ExpectedContentQueue()
+    private val expectedContentQueue = ExpectedContentQueue<K3Content>()
     private val emojiCommitGuard = Mutex()
     private data class AutoCorrectionUndo(
         val editor: ImeEditor,
@@ -539,6 +539,12 @@ class ImeController(
                 flogDebug { "DEDUPLICATED!!1" }
                 return
             }
+            // Some editors repeat an intermediate acknowledgement after we have already
+            // committed the separator. Verify an unexpected callback against the live editor
+            // before changing state; otherwise it can discard correction undo and tap history.
+            val liveSelection = state.editor.currentSelectionOrNull()
+            if (liveSelection != null && liveSelection != newSelection) return
+            expectedContentQueue.clear()
             if (lastAutoCorrection?.cursor != newSelection.start || !newSelection.isCollapsed()) {
                 lastAutoCorrection = null
             }
@@ -988,26 +994,6 @@ enum class OperationScope {
     AFTER_CURSOR;
 }
 
-private class ExpectedContentQueue {
-    private val list = mutableListOf<K3Content>()
-
-    fun popUntilOrNull(predicate: (K3Content) -> Boolean): K3Content? {
-        while (list.isNotEmpty()) {
-            val item = list[0]
-            if (predicate(item)) return list.removeAt(0)
-            list.removeAt(0)
-        }
-        return null
-    }
-
-    fun push(item: K3Content) {
-        list.add(item)
-    }
-
-    fun clear() {
-        list.clear()
-    }
-}
 
 fun K3Content.cursorCapsMode(inputAttributes: InputAttributes): InputAttributes.CapsMode {
     return InputAttributes.CapsMode.fromFlags(
