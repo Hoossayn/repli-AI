@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.browser.customtabs.CustomTabsIntent
+import dev.patrickgold.florisboard.BuildConfig
 import dev.patrickgold.florisboard.lib.devtools.flogError
 import dev.patrickgold.florisboard.repli.openai.OpenAiCredential
 import dev.patrickgold.florisboard.repli.openai.OpenAiTransport
@@ -61,6 +62,11 @@ object ChatGptAccountManager {
 
     /** Opens the ChatGPT sign-in page in a Custom Tab and completes the flow when the browser returns. */
     suspend fun signIn(context: Context): Result<Unit> = operation {
+        // Sockets, files and the token exchange all belong off the main thread.
+        withContext(Dispatchers.IO) { signInBlocking(context) }
+    }
+
+    private suspend fun signInBlocking(context: Context) {
         val current = record ?: store.load()
         if (current.clientId == null) store.save(current) // the host id must exist before the first authorize call
         LoopbackRedirectServer(RETURN_LINK, APP_NAME).use { server ->
@@ -159,15 +165,20 @@ object ChatGptAccountManager {
             publish(busy = false)
             throw cancellation
         } catch (error: OAuthException) {
-            flogError { "RepliChatGpt: ${error.failure} (${error.message})" }
-            publish(busy = false, errorMessage = if (error.failure == OAuthFailure.CANCELLED) null else error.failure.label)
+            // Cause class and message only (an IOException message names a host, never a token).
+            flogError { "RepliChatGpt: ${error.failure} (${error.message}) cause=${error.cause?.let { it::class.java.name + ": " + it.message }}" }
+            publish(busy = false, errorMessage = if (error.failure == OAuthFailure.CANCELLED) null else detailed(error.failure.label, error.cause))
             Result.failure(error)
         } catch (error: Exception) {
-            flogError { "RepliChatGpt: ${error::class.java.simpleName}" }
-            publish(busy = false, errorMessage = OAuthFailure.UNAVAILABLE.label)
+            flogError { "RepliChatGpt: ${error::class.java.name}: ${error.message}" }
+            publish(busy = false, errorMessage = detailed(OAuthFailure.UNAVAILABLE.label, error))
             Result.failure(error)
         }
     }
+
+    /** Debug builds show the underlying exception so a failing step can be named without a logcat session. */
+    private fun detailed(label: String, cause: Throwable?): String =
+        if (BuildConfig.DEBUG && cause != null) "$label · ${cause::class.java.simpleName}: ${cause.message}" else label
 
     private fun openBrowser(context: Context, url: String) {
         val uri = Uri.parse(url)
