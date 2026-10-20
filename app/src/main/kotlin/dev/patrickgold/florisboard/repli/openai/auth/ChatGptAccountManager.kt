@@ -30,6 +30,8 @@ data class ChatGptAccountState(
     val errorMessage: String? = null,
     /** Set when sign-out could not confirm revocation; the user can disconnect Repli in ChatGPT settings. */
     val revocationUnconfirmed: Boolean = false,
+    /** The browser step is done; the token exchange is waiting for Repli to be in the foreground. */
+    val finishPending: Boolean = false,
 )
 
 /**
@@ -66,10 +68,15 @@ object ChatGptAccountManager {
         withContext(Dispatchers.IO) { signInBlocking(context) }
     }
 
+    /** The authorization code received from the browser, exchanged once Repli is back in the foreground. */
+    private class PendingExchange(val clientId: String, val code: String, val pending: PendingAuthorization, val record: ChatGptAccountRecord)
+    @Volatile private var pendingExchange: PendingExchange? = null
+
     private suspend fun signInBlocking(context: Context) {
+        pendingExchange = null
         val current = record ?: store.load()
         if (current.clientId == null) store.save(current) // the host id must exist before the first authorize call
-        LoopbackRedirectServer(RETURN_LINK, APP_NAME).use { server ->
+        val exchange = LoopbackRedirectServer(RETURN_LINK, APP_NAME).use { server ->
             val pending = oauth.begin(current.clientId, server.redirectUri)
             val url = oauth.authorizationUrl(
                 pending, current.hostId, APP_NAME,
@@ -79,20 +86,52 @@ object ChatGptAccountManager {
             val callback = server.await(SIGN_IN_TIMEOUT_MILLIS)
                 ?: throw OAuthException(OAuthFailure.CANCELLED, "no callback before timeout")
             val clientId = oauth.acceptCallback(pending, callback)
-            val tokens = oauth.exchangeCode(clientId, callback.code!!, pending)
-            val idToken = tokens.idToken ?: throw OAuthException(OAuthFailure.INVALID_TOKEN, "no id token")
-            val identity = verifier.verify(idToken, clientId, pending.nonce)
-            if (current.subject != null && current.clientId == clientId && current.subject != identity.subject) {
-                throw OAuthException(OAuthFailure.INVALID_TOKEN, "a different account answered for this registration")
-            }
-            if (!tokens.grantsPlanUsage) throw OAuthException(OAuthFailure.PLAN_NOT_GRANTED, "plan scope missing")
-            record = ChatGptAccountRecord(
-                clientId = clientId, hostId = current.hostId,
-                subject = identity.subject, email = identity.email, name = identity.name,
-                tokens = tokens, savedAtEpochSeconds = System.currentTimeMillis() / 1_000,
-                welcomeShown = current.welcomeShown,
-            ).also(store::save)
+            PendingExchange(clientId, callback.code!!, pending, current)
         }
+        // The browser is still in front at this point and Android may deny a backgrounded app
+        // network access (Data Saver / background restrictions). Try now; if the network is not
+        // there, keep the code and finish when the user returns to Repli.
+        try {
+            complete(exchange)
+        } catch (error: OAuthException) {
+            if (error.failure != OAuthFailure.CONNECTION) throw error
+            pendingExchange = exchange
+            throw OAuthException(OAuthFailure.FINISH_IN_APP, "exchange deferred until foreground", error.cause)
+        }
+    }
+
+    /** Called when the plan screen comes to the foreground: finishes a sign-in whose exchange was deferred. */
+    suspend fun completePendingSignIn(): Result<Unit>? {
+        val exchange = pendingExchange ?: return null
+        val result = operation {
+            withContext(Dispatchers.IO) { complete(exchange) }
+            pendingExchange = null
+        }
+        // Only a network failure is worth another try with the same code; anything else needs a fresh sign-in.
+        val failure = (result.exceptionOrNull() as? OAuthException)?.failure
+        if (failure != null && failure != OAuthFailure.CONNECTION) {
+            pendingExchange = null
+            publish()
+        }
+        return result
+    }
+
+    private suspend fun complete(exchange: PendingExchange) {
+        val current = exchange.record
+        val clientId = exchange.clientId
+        val tokens = oauth.exchangeCode(clientId, exchange.code, exchange.pending)
+        val idToken = tokens.idToken ?: throw OAuthException(OAuthFailure.INVALID_TOKEN, "no id token")
+        val identity = verifier.verify(idToken, clientId, exchange.pending.nonce)
+        if (current.subject != null && current.clientId == clientId && current.subject != identity.subject) {
+            throw OAuthException(OAuthFailure.INVALID_TOKEN, "a different account answered for this registration")
+        }
+        if (!tokens.grantsPlanUsage) throw OAuthException(OAuthFailure.PLAN_NOT_GRANTED, "plan scope missing")
+        record = ChatGptAccountRecord(
+            clientId = clientId, hostId = current.hostId,
+            subject = identity.subject, email = identity.email, name = identity.name,
+            tokens = tokens, savedAtEpochSeconds = System.currentTimeMillis() / 1_000,
+            welcomeShown = current.welcomeShown,
+        ).also(store::save)
     }
 
     /** A fresh-enough access token for one request, refreshing under the lock when near expiry; null when signed out. */
@@ -167,7 +206,8 @@ object ChatGptAccountManager {
         } catch (error: OAuthException) {
             // Cause class and message only (an IOException message names a host, never a token).
             flogError { "RepliChatGpt: ${error.failure} (${error.message}) cause=${error.cause?.let { it::class.java.name + ": " + it.message }}" }
-            publish(busy = false, errorMessage = if (error.failure == OAuthFailure.CANCELLED) null else detailed(error.failure.label, error.cause))
+            val quiet = error.failure == OAuthFailure.CANCELLED || error.failure == OAuthFailure.FINISH_IN_APP
+            publish(busy = false, errorMessage = if (quiet) null else detailed(error.failure.label, error.cause))
             Result.failure(error)
         } catch (error: Exception) {
             flogError { "RepliChatGpt: ${error::class.java.name}: ${error.message}" }
@@ -208,6 +248,7 @@ object ChatGptAccountManager {
             welcomePending = current?.signedIn == true && current.welcomeShown.not(),
             errorMessage = errorMessage,
             revocationUnconfirmed = revocationUnconfirmed,
+            finishPending = pendingExchange != null,
         )
     }
 }
