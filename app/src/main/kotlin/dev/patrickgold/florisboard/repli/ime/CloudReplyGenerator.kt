@@ -2,12 +2,9 @@ package dev.patrickgold.florisboard.repli.ime
 
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
-import dev.patrickgold.florisboard.BuildConfig
 import dev.patrickgold.florisboard.R
 import dev.patrickgold.florisboard.lib.devtools.flogDebug
 import dev.patrickgold.florisboard.lib.devtools.flogError
-import dev.patrickgold.florisboard.repli.account.RepliAccountSessionRepository
-import dev.patrickgold.florisboard.repli.account.RepliFirebaseAccountManager
 import dev.patrickgold.florisboard.repli.capture.ReplyCaptureSession
 import dev.patrickgold.florisboard.repli.capture.ReplyCaptureState
 import dev.patrickgold.florisboard.repli.capture.ReplyPhase
@@ -19,8 +16,7 @@ import dev.patrickgold.florisboard.repli.suggestions.CloudReplyFailure
 import dev.patrickgold.florisboard.repli.suggestions.PreparedRemoteReplyRequest
 import dev.patrickgold.florisboard.repli.suggestions.RemoteReplyException
 import dev.patrickgold.florisboard.repli.suggestions.RemoteReplyPrivacyPolicy
-import dev.patrickgold.florisboard.repli.suggestions.RepliAccountSessionProvider
-import dev.patrickgold.florisboard.repli.suggestions.ServerMediatedReplyEngine
+import dev.patrickgold.florisboard.repli.openai.RepliOpenAiAccess
 import java.io.IOException
 import java.net.SocketTimeoutException
 import kotlinx.coroutines.CancellationException
@@ -37,9 +33,8 @@ import kotlinx.coroutines.withTimeout
  * writes the outcome back into [ReplyCaptureSession]. Nothing here touches the UI directly.
  */
 internal class CloudReplyGenerator(private val host: ReplyFlowHost) {
-    private val engine = BuildConfig.REPLI_BACKEND_URL
-        .takeIf(ServerMediatedReplyEngine::isConfigured)
-        ?.let { ServerMediatedReplyEngine(it, RepliAccountSessionProvider) }
+    /** Device-direct: the user's ChatGPT plan or API key, never a Repli server. */
+    private val engine = RepliOpenAiAccess.engines()
 
     private var generation: Job? = null
 
@@ -54,7 +49,7 @@ internal class CloudReplyGenerator(private val host: ReplyFlowHost) {
     var pendingMore: Boolean = false
         private set
 
-    val configured: Boolean get() = engine != null
+    val configured: Boolean get() = RepliOpenAiAccess.configured
 
     fun cancel() {
         generation?.cancel()
@@ -124,10 +119,8 @@ internal class CloudReplyGenerator(private val host: ReplyFlowHost) {
 
     fun unavailableReason(): String? {
         val context = host.appContext
-        if (engine == null) return context.getString(R.string.repli_reply__cloud_not_configured)
         if (!RemoteGenerationPreferences(context).enabled) return context.getString(R.string.repli_reply__cloud_disabled)
-        if (RepliAccountSessionRepository.bearerToken() == null &&
-            !RepliFirebaseAccountManager.state.value.signedIn) return context.getString(R.string.repli_reply__cloud_sign_in)
+        if (!RepliOpenAiAccess.configured) return context.getString(R.string.repli_reply__cloud_sign_in)
         val manager = context.getSystemService(ConnectivityManager::class.java)
         val capabilities = manager?.activeNetwork?.let(manager::getNetworkCapabilities)
         if (capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) != true) {
@@ -182,7 +175,7 @@ internal class CloudReplyGenerator(private val host: ReplyFlowHost) {
             }
             return
         }
-        val remote = engine ?: return
+        val remote = engine
         val context = host.appContext
         generation?.cancel()
         ReviewEvidenceStore.discard(state.id)
@@ -193,7 +186,7 @@ internal class CloudReplyGenerator(private val host: ReplyFlowHost) {
         }
         generation = host.scope.launch(Dispatchers.IO) {
             try {
-                val batch = withTimeout(GENERATION_TIMEOUT_MS) { remote.suggestDetailed(approved) }
+                val batch = withTimeout(GENERATION_TIMEOUT_MS) { remote.suggest(approved) }
                 withContext(Dispatchers.Main) {
                     if (ReplyCaptureSession.state.value?.id != state.id) return@withContext
                     pendingRemoteRequest = null

@@ -58,6 +58,8 @@ data class PromptOptions(
     /** When false the schema is described in the instructions instead of `text.format` (fallback for models that reject it). */
     val structuredOutput: Boolean = true,
     val stream: Boolean = true,
+    /** The ChatGPT-plan route rejects `max_output_tokens`; the API-key route accepts it. */
+    val maxOutputTokens: Boolean = true,
 )
 
 object ReplyPromptBuilder {
@@ -130,10 +132,10 @@ object ReplyPromptBuilder {
         val instructions = "$REPLY_INSTRUCTIONS ${replySituationGuidance(prompt)} ${writingStyleGuidance(prompt)}"
         return base(model, options).apply {
             put("instructions", if (options.structuredOutput) instructions else instructions + PLAIN_JSON_CANDIDATES)
-            put("input", payload.toString())
+            put("input", userInput(payload.toString()))
             if (options.structuredOutput) put("text", textFormat("reply_candidates", candidatesSchema(), options))
             else options.verbosity?.let { put("text", JSONObject().put("verbosity", it)) }
-            put("max_output_tokens", MAX_OUTPUT_TOKENS)
+            if (options.maxOutputTokens) put("max_output_tokens", MAX_OUTPUT_TOKENS)
         }
     }
 
@@ -156,7 +158,7 @@ object ReplyPromptBuilder {
             put("input", JSONArray().put(JSONObject().put("role", "user").put("content", content)))
             if (options.structuredOutput) put("text", textFormat("visual_bubbles", visualBubblesSchema(), options))
             else options.verbosity?.let { put("text", JSONObject().put("verbosity", it)) }
-            put("max_output_tokens", MAX_VISION_OUTPUT_TOKENS)
+            if (options.maxOutputTokens) put("max_output_tokens", MAX_VISION_OUTPUT_TOKENS)
         }
     }
 
@@ -173,10 +175,10 @@ object ReplyPromptBuilder {
         val instructions = "$REWRITE_INSTRUCTIONS Tone for this rewrite: $tone"
         return base(model, options).apply {
             put("instructions", if (options.structuredOutput) instructions else instructions + PLAIN_JSON_CANDIDATES)
-            put("input", payload.toString())
+            put("input", userInput(payload.toString()))
             if (options.structuredOutput) put("text", textFormat("rewrite_candidates", candidatesSchema(), options))
             else options.verbosity?.let { put("text", JSONObject().put("verbosity", it)) }
-            put("max_output_tokens", MAX_REWRITE_OUTPUT_TOKENS)
+            if (options.maxOutputTokens) put("max_output_tokens", MAX_REWRITE_OUTPUT_TOKENS)
         }
     }
 
@@ -243,6 +245,9 @@ object ReplyPromptBuilder {
         put("stream", options.stream)
         options.reasoningEffort?.let { put("reasoning", JSONObject().put("effort", it)) }
     }
+
+    /** The plan route requires `input` to be an array of items; the JSON payload travels as one user message. */
+    private fun userInput(text: String) = JSONArray().put(JSONObject().put("role", "user").put("content", text))
 
     private fun textFormat(name: String, schema: JSONObject, options: PromptOptions) = JSONObject().apply {
         options.verbosity?.let { put("verbosity", it) }

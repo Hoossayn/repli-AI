@@ -6,13 +6,10 @@ import android.content.Intent
 import android.os.Build
 import android.util.DisplayMetrics
 import android.view.WindowManager
-import dev.patrickgold.florisboard.BuildConfig
 import dev.patrickgold.florisboard.R
 import dev.patrickgold.florisboard.ime.editor.FlorisEditorInfo
 import dev.patrickgold.florisboard.lib.devtools.flogDebug
 import dev.patrickgold.florisboard.lib.devtools.flogError
-import dev.patrickgold.florisboard.repli.account.RepliAccountSessionRepository
-import dev.patrickgold.florisboard.repli.account.RepliFirebaseAccountManager
 import dev.patrickgold.florisboard.repli.capture.CaptureViewport
 import dev.patrickgold.florisboard.repli.capture.ConversationTurn
 import dev.patrickgold.florisboard.repli.capture.PendingVisionCaptureStore
@@ -44,11 +41,9 @@ import dev.patrickgold.florisboard.repli.persona.BuiltInPersonas
 import dev.patrickgold.florisboard.repli.persona.Persona
 import dev.patrickgold.florisboard.repli.persona.PersonaRepository
 import dev.patrickgold.florisboard.repli.suggestions.ReplyIntent
-import dev.patrickgold.florisboard.repli.suggestions.RepliAccountSessionProvider
-import dev.patrickgold.florisboard.repli.suggestions.ServerMediatedContextEngine
+import dev.patrickgold.florisboard.repli.openai.RepliOpenAiAccess
 import dev.patrickgold.florisboard.repli.review.FullScreenContextReviewActivity
 import dev.patrickgold.florisboard.repli.review.FullScreenContextReviewSession
-import dev.patrickgold.florisboard.repli.suggestions.ServerMediatedReplyEngine
 import dev.patrickgold.florisboard.repli.voice.VoiceRecordingState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -134,9 +129,8 @@ class RepliReplyOrchestrator(
     private val mutable = MutableStateFlow(RepliReplyUiState())
     val uiState: StateFlow<RepliReplyUiState> = mutable.asStateFlow()
 
-    private val contextEngine = BuildConfig.REPLI_BACKEND_URL
-        .takeIf(ServerMediatedReplyEngine::isConfigured)
-        ?.let { ServerMediatedContextEngine(it, RepliAccountSessionProvider) }
+    /** Screenshot reading goes straight to OpenAI on the user's plan or key. */
+    private val contextEngine = RepliOpenAiAccess.engines()
 
     override val telemetry = CaptureTelemetry(appContext)
     private val guidance = ReplyGuidanceController(this)
@@ -803,7 +797,7 @@ class RepliReplyOrchestrator(
 
     private fun handleCaptureReview(state: ReplyCaptureState) {
         val pending = PendingVisionCaptureStore.peek(state.id)
-        val canUseVision = pending != null && remoteEnabled() && contextEngine != null
+        val canUseVision = pending != null && remoteEnabled()
         if (!canUseVision) {
             val taken = PendingVisionCaptureStore.take(state.id)
             taken?.eraseImages()
@@ -892,9 +886,7 @@ class RepliReplyOrchestrator(
     }
 
     private fun remoteEnabled(): Boolean =
-        RemoteGenerationPreferences(appContext).enabled &&
-            (RepliAccountSessionRepository.bearerToken() != null ||
-                RepliFirebaseAccountManager.state.value.signedIn)
+        RemoteGenerationPreferences(appContext).enabled && RepliOpenAiAccess.configured
 
     private fun selectCapturedContact(localHeaderName: String?, aiName: String? = null) {
         val sessionId = ReplyCaptureSession.state.value?.id ?: return

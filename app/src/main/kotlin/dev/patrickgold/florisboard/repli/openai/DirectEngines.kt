@@ -33,6 +33,8 @@ class DirectReplyEngines(
     private val credentials: OpenAiCredentialProvider,
     private val memory: ProfileMemoryStore?,
     private val client: OpenAiPlanClient = OpenAiPlanClient(),
+    /** Called when api.openai.com rejected a ChatGPT-plan token, so the session layer can refresh or re-sign-in. */
+    private val onPlanTokenRejected: () -> Unit = {},
 ) {
     /** Three candidates, with on-device memory recalled before and remembered after, like the backend did. */
     suspend fun suggest(request: PreparedRemoteReplyRequest): RemoteReplyBatch {
@@ -49,7 +51,7 @@ class DirectReplyEngines(
             intent = if (request.replySituation.intent == ReplyIntent.FRESH_START) PromptIntent.FRESH_START else PromptIntent.REPLY,
             timeZoneId = request.replySituation.timeZoneId,
         )
-        val result = translating { client.generateReplies(credential, prompt) }
+        val result = translating(credential) { client.generateReplies(credential, prompt) }
         val saved = request.profileId?.let { memory?.remember(it, context) }
         return RemoteReplyBatch(result.value, memorySaved = saved, memoryTurns = recall?.history?.size)
     }
@@ -67,7 +69,7 @@ class DirectReplyEngines(
         } finally {
             images.forEach { it.fill(0) }
         }
-        val capture = translating { client.readScreenshots(credential, encoded, "image/png") }.value
+        val capture = translating(credential) { client.readScreenshots(credential, encoded, "image/png") }.value
         val bubbles = capture.bubbles.map { bubble ->
             VisualBubble(bubble.text, bubble.fromMe, TurnSource(bubble.frameIndex, bubble.left, bubble.top, bubble.right, bubble.bottom))
         }
@@ -78,13 +80,16 @@ class DirectReplyEngines(
         val credential = credentials.credentialForRequest()
             ?: throw RemoteReplyAuthenticationException("Sign in with ChatGPT or add an API key")
         val prompt = RewritePrompt(request.text, request.tone.wireValue, request.style.toPrompt(), request.instructions)
-        return translating { client.rewrite(credential, prompt) }.value
+        return translating(credential) { client.rewrite(credential, prompt) }.value
     }
 
-    private inline fun <T> translating(block: () -> T): T = try {
+    private inline fun <T> translating(credential: OpenAiCredential, block: () -> T): T = try {
         block()
     } catch (error: OpenAiException) {
-        if (error.failure == OpenAiFailure.SIGN_IN_REQUIRED) throw RemoteReplyAuthenticationException(error.message ?: "Sign in again")
+        if (error.failure == OpenAiFailure.SIGN_IN_REQUIRED) {
+            if (credential is OpenAiCredential.ChatGptPlan) onPlanTokenRejected()
+            throw RemoteReplyAuthenticationException(error.message ?: "Sign in again")
+        }
         throw RemoteReplyException(error.message ?: "OpenAI request failed", error, reason = error.failure.toCloudFailure())
     }
 

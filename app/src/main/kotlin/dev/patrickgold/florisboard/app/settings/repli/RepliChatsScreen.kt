@@ -41,8 +41,7 @@ import dev.patrickgold.florisboard.app.LocalNavController
 import dev.patrickgold.florisboard.R
 import dev.patrickgold.florisboard.app.Routes
 import dev.patrickgold.florisboard.repli.data.LearnedStyleRepository
-import dev.patrickgold.florisboard.repli.account.ProfileMemoryClient
-import dev.patrickgold.florisboard.repli.account.RepliFirebaseAccountManager
+import dev.patrickgold.florisboard.repli.openai.RepliOpenAiAccess
 import dev.patrickgold.florisboard.repli.data.ProfileRepository
 import dev.patrickgold.florisboard.repli.identity.CapturedContactName
 import dev.patrickgold.florisboard.repli.profile.VoiceProfile
@@ -164,18 +163,18 @@ fun RepliChatsScreen() {
     removeProfile?.let { profile ->
         AlertDialog(onDismissRequest = { removeProfile = null },
             title = { Text("Remove ${profile.name}?") },
-            text = { Text(removeError ?: "This removes the chat and its writing examples from this device and deletes its saved cloud history.") },
+            text = { Text(removeError ?: "This removes the chat, its writing examples and its saved chat memory from this device.") },
             confirmButton = { TextButton(enabled = !removing, onClick = {
                 removing = true
                 scope.launch {
                     try {
-                        if (RepliFirebaseAccountManager.state.value.configured) ProfileMemoryClient.delete(profile.id)
+                        RepliOpenAiAccess.memory().forget(profile.id)
                         repository.remove(profile.id)
                         profiles = repository.profiles()
                         removeProfile = null
                         removeError = null
                     } catch (error: Exception) {
-                        removeError = error.message ?: "Could not remove cloud memory. Try again."
+                        removeError = error.message ?: "Could not remove this chat. Try again."
                     } finally {
                         removing = false
                     }

@@ -3,22 +3,17 @@ package dev.patrickgold.florisboard.repli.ime
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
-import dev.patrickgold.florisboard.BuildConfig
 import dev.patrickgold.florisboard.R
 import dev.patrickgold.florisboard.lib.devtools.flogError
-import dev.patrickgold.florisboard.repli.account.RepliAccountSessionRepository
-import dev.patrickgold.florisboard.repli.account.RepliFirebaseAccountManager
 import dev.patrickgold.florisboard.repli.data.LearnedStyleRepository
 import dev.patrickgold.florisboard.repli.data.RemoteGenerationPreferences
 import dev.patrickgold.florisboard.repli.diagnostics.CaptureTelemetry
 import dev.patrickgold.florisboard.repli.suggestions.CloudReplyFailure
 import dev.patrickgold.florisboard.repli.suggestions.PreparedRewriteRequest
 import dev.patrickgold.florisboard.repli.suggestions.RemoteReplyException
-import dev.patrickgold.florisboard.repli.suggestions.RepliAccountSessionProvider
+import dev.patrickgold.florisboard.repli.openai.RepliOpenAiAccess
 import dev.patrickgold.florisboard.repli.suggestions.RewritePrivacyPolicy
 import dev.patrickgold.florisboard.repli.suggestions.RewriteTone
-import dev.patrickgold.florisboard.repli.suggestions.ServerMediatedReplyEngine
-import dev.patrickgold.florisboard.repli.suggestions.ServerMediatedRewriteEngine
 import java.io.IOException
 import java.net.SocketTimeoutException
 import kotlinx.coroutines.CancellationException
@@ -61,9 +56,7 @@ class RewriteController(
     val uiState: StateFlow<RewriteUiState> = mutable.asStateFlow()
     private val telemetry = CaptureTelemetry(appContext)
     private val preferences = appContext.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
-    private val engine = BuildConfig.REPLI_BACKEND_URL
-        .takeIf(ServerMediatedReplyEngine::isConfigured)
-        ?.let { ServerMediatedRewriteEngine(it, RepliAccountSessionProvider) }
+    private val engine = RepliOpenAiAccess.engines()
 
     private var snapshot: ComposerSnapshot? = null
     private var job: Job? = null
@@ -127,7 +120,7 @@ class RewriteController(
             mutable.value = current.copy(busy = false, status = unavailable, candidates = emptyList())
             return
         }
-        val remote = engine ?: return
+        val remote = engine
         job?.cancel()
         mutable.value = current.copy(busy = true, status = appContext.getString(R.string.repli_rewrite__working), candidates = emptyList())
         telemetry.count(CaptureTelemetry.REWRITE_REQUESTED)
@@ -166,10 +159,8 @@ class RewriteController(
     }
 
     private fun unavailableReason(): String? {
-        if (engine == null) return appContext.getString(R.string.repli_reply__cloud_not_configured)
         if (!RemoteGenerationPreferences(appContext).enabled) return appContext.getString(R.string.repli_reply__cloud_disabled)
-        if (RepliAccountSessionRepository.bearerToken() == null &&
-            !RepliFirebaseAccountManager.state.value.signedIn) return appContext.getString(R.string.repli_reply__cloud_sign_in)
+        if (!RepliOpenAiAccess.configured) return appContext.getString(R.string.repli_reply__cloud_sign_in)
         val manager = appContext.getSystemService(ConnectivityManager::class.java)
         val capabilities = manager?.activeNetwork?.let(manager::getNetworkCapabilities)
         if (capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) != true) {

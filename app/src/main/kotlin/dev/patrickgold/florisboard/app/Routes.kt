@@ -53,6 +53,8 @@ import dev.patrickgold.florisboard.app.settings.HomeScreen
 import dev.patrickgold.florisboard.app.settings.about.AboutScreen
 import dev.patrickgold.florisboard.app.settings.account.RepliAccountScreen
 import dev.patrickgold.florisboard.app.settings.account.RepliOnboardingScreen
+import dev.patrickgold.florisboard.app.settings.repli.ChatGptPlanScreen
+import dev.patrickgold.florisboard.app.settings.repli.OpenAiApiKeyScreen
 import dev.patrickgold.florisboard.app.settings.repli.RepliChatsScreen
 import dev.patrickgold.florisboard.app.settings.repli.RepliPersonasScreen
 import dev.patrickgold.florisboard.app.settings.repli.RepliHomeScreen
@@ -237,6 +239,13 @@ object Routes {
         object RepliReplies
 
         @Serializable
+        @Deeplink("settings/chatgpt-plan")
+        object ChatGptPlan
+
+        @Serializable
+        object OpenAiApiKey
+
+        @Serializable
         @Deeplink("settings/about/project-license")
         object ProjectLicense
 
@@ -373,6 +382,8 @@ object Routes {
             composableWithDeepLink(Settings.RepliSettings::class) { RepliSettingsScreen() }
             composableWithDeepLink(Settings.LearnByScrolling::class) { LearnByScrollingScreen() }
             composableWithDeepLink(Settings.RepliReplies::class) { RepliRepliesScreen() }
+            composableWithDeepLink(Settings.ChatGptPlan::class) { ChatGptPlanScreen() }
+            composable<Settings.OpenAiApiKey> { OpenAiApiKeyScreen() }
             composableWithDeepLink(Settings.ProjectLicense::class) { ProjectLicenseScreen() }
             composableWithDeepLink(Settings.ThirdPartyLicenses::class) { ThirdPartyLicensesScreen() }
 

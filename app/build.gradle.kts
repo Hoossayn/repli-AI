@@ -237,6 +237,8 @@ dependencies {
     implementation(libs.firebase.auth)
     implementation(libs.firebase.crashlytics)
     implementation(libs.androidx.credentials)
+    // Custom Tabs for Sign in with ChatGPT (loopback redirect comes back to the app).
+    implementation(libs.androidx.browser)
     implementation(libs.androidx.credentials.play.services.auth)
     implementation(libs.googleid)
     implementation(libs.mlkit.text.recognition)

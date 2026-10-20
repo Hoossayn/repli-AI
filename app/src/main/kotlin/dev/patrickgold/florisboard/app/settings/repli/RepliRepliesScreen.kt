@@ -37,7 +37,8 @@ import dev.patrickgold.florisboard.app.LocalNavController
 import dev.patrickgold.florisboard.app.Routes
 import dev.patrickgold.florisboard.lib.compose.FlorisScreen
 import dev.patrickgold.florisboard.lib.util.InputMethodUtils
-import dev.patrickgold.florisboard.repli.account.RepliFirebaseAccountManager
+import dev.patrickgold.florisboard.repli.openai.RepliOpenAiAccess
+import dev.patrickgold.florisboard.repli.openai.auth.ChatGptAccountManager
 import dev.patrickgold.florisboard.repli.capture.ReplyAutoScrollAccessibilityService
 import dev.patrickgold.florisboard.repli.data.RemoteGenerationPreferences
 import dev.patrickgold.florisboard.repli.practice.PracticeChatActivity
@@ -53,7 +54,8 @@ fun RepliRepliesScreen() = FlorisScreen {
     content {
         val context = LocalContext.current
         val navController = LocalNavController.current
-        val accountState by RepliFirebaseAccountManager.state.collectAsState()
+        val chatGpt by ChatGptAccountManager.state.collectAsState()
+        val aiConnected = remember(chatGpt.planAllowed) { RepliOpenAiAccess.configured }
         val keyboardEnabled by InputMethodUtils.observeIsFlorisboardEnabled(foregroundOnly = true)
         val keyboardSelected by InputMethodUtils.observeIsFlorisboardSelected(foregroundOnly = true)
         var cloudEnabled by remember { mutableStateOf(RemoteGenerationPreferences(context).enabled) }
@@ -81,19 +83,19 @@ fun RepliRepliesScreen() = FlorisScreen {
                     stringRes(R.string.repli_replies__cloud_off)
                 },
                 onClick = {
-                    if (!accountState.signedIn) {
-                        navController.navigate(Routes.Settings.Account)
+                    if (!aiConnected) {
+                        navController.navigate(Routes.Settings.ChatGptPlan)
                     } else {
                         cloudEnabled = !cloudEnabled
                         RemoteGenerationPreferences(context).enabled = cloudEnabled
                     }
                 },
             )
-            if (!accountState.signedIn) {
+            if (!aiConnected) {
                 Preference(
                     icon = Icons.Default.AccountCircle,
                     title = stringRes(R.string.repli_replies__sign_in_first),
-                    onClick = { navController.navigate(Routes.Settings.Account) },
+                    onClick = { navController.navigate(Routes.Settings.ChatGptPlan) },
                 )
             }
         }

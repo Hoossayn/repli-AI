@@ -14,6 +14,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -31,7 +32,9 @@ import dev.patrickgold.florisboard.app.LocalNavController
 import dev.patrickgold.florisboard.app.Routes
 import dev.patrickgold.florisboard.ime.nlp.latin.repli.AdaptiveLanguageRepository
 import dev.patrickgold.florisboard.ime.nlp.latin.repli.KeyboardLearningPreferences
-import dev.patrickgold.florisboard.repli.account.RepliFirebaseAccountManager
+import dev.patrickgold.florisboard.repli.openai.OpenAiRoute
+import dev.patrickgold.florisboard.repli.openai.RepliOpenAiAccess
+import dev.patrickgold.florisboard.repli.openai.auth.ChatGptAccountManager
 import dev.patrickgold.florisboard.repli.capture.ReplyAutoScrollAccessibilityService
 import dev.patrickgold.florisboard.repli.data.AutoScrollPreferences
 import dev.patrickgold.florisboard.repli.data.RecentMessageRepository
@@ -46,7 +49,9 @@ fun RepliSettingsScreen() {
     val context = LocalContext.current
     val keyboard by context.imeController()
     val navController = LocalNavController.current
-    val account by RepliFirebaseAccountManager.state.collectAsState()
+    val chatGpt by ChatGptAccountManager.state.collectAsState()
+    var aiRoute by remember { mutableStateOf(RepliOpenAiAccess.route()) }
+    LaunchedEffect(chatGpt.planAllowed) { aiRoute = RepliOpenAiAccess.route() }
     val remote = remember(context) { RemoteGenerationPreferences(context) }
     val capture = remember(context) { AutoScrollPreferences(context) }
     val learning = remember(context) { KeyboardLearningPreferences(context) }
@@ -72,6 +77,7 @@ fun RepliSettingsScreen() {
                 notificationEnabled = hasNotificationAccess(context)
                 accessibilityEnabled = hasCaptureAccessibility(context)
                 cloudEnabled = remote.enabled
+                aiRoute = RepliOpenAiAccess.route()
                 guideEnabled = capture.enabled
                 learningEnabled = learning.enabled
             }
@@ -92,31 +98,25 @@ fun RepliSettingsScreen() {
 
         Spacer(Modifier.height(20.dp))
         RepliCard {
-            RepliLabel("Cloud replies & account", 18, RepliStyle.ink, bold = true)
+            RepliLabel("AI replies & your ChatGPT plan", 18, RepliStyle.ink, bold = true)
             Spacer(Modifier.height(8.dp))
-            RepliLabel(when {
-                !account.configured -> "Cloud account setup is unavailable in this build."
-                account.signedIn -> "Signed in as ${account.email.orEmpty()}"
-                else -> "Sign in or create an account · your cloud session is created automatically."
+            RepliLabel(when (aiRoute) {
+                OpenAiRoute.CHATGPT_PLAN -> "Using ChatGPT plan · ${chatGpt.email ?: "signed in"}"
+                OpenAiRoute.API_KEY -> "Using your OpenAI API key"
+                null -> "Not connected. Sign in with ChatGPT to use your plan, or add an OpenAI API key."
             }, 14, RepliStyle.muted)
             Spacer(Modifier.height(12.dp))
-            RepliAction(if (account.signedIn) "Manage account" else "Sign in", {
-                navController.navigate(Routes.Settings.Account)
+            RepliAction(if (aiRoute != null) "Manage ChatGPT & API key" else "Continue with ChatGPT", {
+                navController.navigate(Routes.Settings.ChatGptPlan)
             })
-            if (!account.signedIn) {
-                Spacer(Modifier.height(8.dp))
-                RepliAction("Create account", { navController.navigate(Routes.Settings.Account) },
-                    filled = false)
-            }
             Spacer(Modifier.height(8.dp))
             RepliLabel(when {
-                !account.configured -> "Not configured in this build."
-                !account.signedIn -> "Unavailable without an authenticated Repli account."
+                aiRoute == null -> "Unavailable until ChatGPT or an API key is connected."
                 cloudEnabled -> "Enabled. Captures use AI reading; reply generation waits for context review."
-                else -> "Off. Cloud reply generation is unavailable."
+                else -> "Off. AI reply generation is unavailable."
             }, 13, RepliStyle.muted)
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(checked = cloudEnabled, enabled = account.signedIn,
+                Checkbox(checked = cloudEnabled, enabled = aiRoute != null,
                     onCheckedChange = { checked ->
                         if (checked) cloudDisclosure = true else {
                             remote.enabled = false

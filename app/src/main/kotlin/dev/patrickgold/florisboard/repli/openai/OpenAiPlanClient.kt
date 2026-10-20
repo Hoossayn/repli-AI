@@ -150,7 +150,7 @@ class OpenAiPlanClient(
         build: (PromptOptions) -> JSONObject,
         parse: (JSONObject) -> T,
     ): OpenAiResult<T> {
-        var options = defaultOptions
+        var options = if (credential is OpenAiCredential.ChatGptPlan) defaultOptions.copy(maxOutputTokens = false) else defaultOptions
         var attempts = 0
         while (true) {
             attempts++
@@ -183,6 +183,7 @@ class OpenAiPlanClient(
             param.startsWith("text.verbosity") && options.verbosity != null -> options.copy(verbosity = null)
             param.startsWith("text") && options.structuredOutput -> options.copy(structuredOutput = false, verbosity = null)
             param.startsWith("stream") && options.stream -> options.copy(stream = false)
+            param.startsWith("max_output_tokens") && options.maxOutputTokens -> options.copy(maxOutputTokens = false)
             else -> null
         }
     }

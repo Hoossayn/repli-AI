@@ -34,7 +34,9 @@ class ReplyPromptBuilderTest {
         val format = body.getJSONObject("text").getJSONObject("format")
         assertEquals("json_schema", format.getString("type"))
         assertEquals("reply_candidates", format.getString("name"))
-        val input = JSONObject(body.getString("input"))
+        val item = body.getJSONArray("input").getJSONObject(0)
+        assertEquals("user", item.getString("role"))
+        val input = JSONObject(item.getString("content"))
         assertEquals(2, input.getJSONArray("context").length())
         assertEquals("them", input.getJSONArray("context").getJSONObject(0).getString("speaker"))
         assertEquals(2, input.getJSONArray("history").length())
@@ -54,7 +56,7 @@ class ReplyPromptBuilderTest {
     @Test fun freshStartAllowsEmptyContextAndChangesGuidance() {
         val body = ReplyPromptBuilder.reply(prompt.copy(context = emptyList(), intent = PromptIntent.FRESH_START), "m", 0)
         assertTrue("start a fresh conversation" in body.getString("instructions"))
-        assertEquals(0, JSONObject(body.getString("input")).getJSONArray("context").length())
+        assertEquals(0, JSONObject(body.getJSONArray("input").getJSONObject(0).getString("content")).getJSONArray("context").length())
         try { ReplyPromptBuilder.reply(prompt.copy(context = emptyList()), "m", 0); fail("reply needs context") } catch (_: IllegalArgumentException) {}
     }
 
@@ -85,7 +87,7 @@ class ReplyPromptBuilderTest {
             PromptOptions(reasoningEffort = "low", verbosity = "low"))
         assertEquals("low", body.getJSONObject("reasoning").getString("effort"))
         assertEquals("low", body.getJSONObject("text").getString("verbosity"))
-        val personaJson = JSONObject(body.getString("input")).getJSONObject("style").getJSONObject("persona")
+        val personaJson = JSONObject(body.getJSONArray("input").getJSONObject(0).getString("content")).getJSONObject("style").getJSONObject("persona")
         assertEquals(3, personaJson.getJSONArray("examples").length())
         val plain = ReplyPromptBuilder.reply(prompt, "m", 0, PromptOptions(structuredOutput = false, stream = false))
         assertFalse(plain.has("text"))
@@ -108,7 +110,7 @@ class ReplyPromptBuilderTest {
         val body = ReplyPromptBuilder.rewrite(RewritePrompt("pls send d money", "polite", style("ok")), "m")
         assertTrue(body.getString("instructions").endsWith("Tone for this rewrite: Make it polite and respectful, suitable for someone the user does not know well or a work contact."))
         assertEquals("rewrite_candidates", body.getJSONObject("text").getJSONObject("format").getString("name"))
-        assertEquals("pls send d money", JSONObject(body.getString("input")).getString("text"))
+        assertEquals("pls send d money", JSONObject(body.getJSONArray("input").getJSONObject(0).getString("content")).getString("text"))
         try { ReplyPromptBuilder.rewrite(RewritePrompt("x", "sarcastic", style()), "m"); fail() } catch (_: IllegalArgumentException) {}
     }
 }
@@ -225,7 +227,10 @@ class OpenAiPlanClientTest {
         val credential = OpenAiCredential.ChatGptPlan("tok")
         val result = client.generateReplies(credential, prompt)
         assertEquals(listOf("a", "b", "c"), result.value)
-        assertEquals("gpt-6.1-sol", JSONObject(String(transport.requests[1].body!!)).getString("model"))
+        val planBody = JSONObject(String(transport.requests[1].body!!))
+        assertEquals("gpt-6.1-sol", planBody.getString("model"))
+        assertFalse(planBody.has("max_output_tokens"), "plan route rejects max_output_tokens")
+        assertTrue(planBody.getBoolean("stream") && !planBody.getBoolean("store"))
         assertEquals("Bearer tok", transport.requests[1].headers["Authorization"])
         client.generateReplies(credential, prompt)
         assertEquals(3, transport.requests.size, "model list is cached")
@@ -240,7 +245,9 @@ class OpenAiPlanClientTest {
         val client = OpenAiPlanClient(transport, "https://example.test/v1")
         client.rewrite(OpenAiCredential.ApiKey("sk-test", "gpt-5-mini"), RewritePrompt("hey", "casual", style()))
         assertEquals(1, transport.requests.size)
-        assertEquals("gpt-5-mini", JSONObject(String(transport.requests[0].body!!)).getString("model"))
+        val keyBody = JSONObject(String(transport.requests[0].body!!))
+        assertEquals("gpt-5-mini", keyBody.getString("model"))
+        assertEquals(700, keyBody.getInt("max_output_tokens"))
     }
 
     @Test fun subscriptionSharingErrorsMapToClosedFailures() = runBlocking {

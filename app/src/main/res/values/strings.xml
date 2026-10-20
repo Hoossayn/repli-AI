@@ -35,7 +35,7 @@
     <string name="repli_replies__cloud_toggle">Enable cloud replies</string>
     <string name="repli_replies__cloud_on">On · each request shows the exact payload for approval before anything is sent.</string>
     <string name="repli_replies__cloud_off">Off · reply generation is unavailable. Keyboard typing and word suggestions still work.</string>
-    <string name="repli_replies__sign_in_first">Sign in first</string>
+    <string name="repli_replies__sign_in_first">Connect ChatGPT first</string>
     <string name="repli_replies__context_title">Reply context</string>
     <string name="repli_replies__notification_access">Notification access</string>
     <string name="repli_replies__guided_capture">Guided capture</string>
@@ -117,7 +117,7 @@
     <string name="repli_reply__idle_default">Suggest replies · saving a chat is optional</string>
     <string name="repli_reply__cloud_not_configured">Cloud replies aren\'t configured in this build.</string>
     <string name="repli_reply__cloud_disabled">Enable cloud replies in Repli settings to generate.</string>
-    <string name="repli_reply__cloud_sign_in">Sign in to Repli to generate cloud replies.</string>
+    <string name="repli_reply__cloud_sign_in">Connect ChatGPT or an API key in Repli to generate AI replies.</string>
     <string name="repli_reply__no_internet">No internet connection. Connect and try again.</string>
     <string name="repli_reply__preparing">Preparing your Repli ideas…</string>
     <string name="repli_reply__prepare_failed">Couldn\'t prepare cloud context. Check the reviewed messages and retry.</string>
