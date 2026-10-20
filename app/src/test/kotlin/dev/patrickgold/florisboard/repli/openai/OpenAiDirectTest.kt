@@ -140,6 +140,21 @@ class OpenAiResponseParsingTest {
         assertEquals(listOf("x", "y", "z"), OpenAiResponseParsing.candidates(envelope.response, 500))
     }
 
+    @Test fun streamWithoutFinalOutputUsesDeltas() {
+        val stream = buildString {
+            append("event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"{\\\"candidates\\\":[\\\"a\\\",\"}\n\n")
+            append("event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"\\\"b\\\",\\\"c\\\"]}\"}\n\n")
+            append("event: response.completed\ndata: ")
+            append(JSONObject().put("type", "response.completed").put("response", JSONObject().put("id", "r").put("status", "completed")
+                .put("output", JSONArray().put(JSONObject().put("type", "reasoning").put("summary", JSONArray())))).toString())
+            append("\n\n")
+        }
+        val envelope = OpenAiResponseParsing.finishedResponse(stream)
+        assertEquals(listOf("a", "b", "c"), OpenAiResponseParsing.candidates(envelope.response, 500))
+        val withDone = stream.replace("event: response.completed", "event: response.output_text.done\ndata: {\"type\":\"response.output_text.done\",\"text\":\"{\\\"candidates\\\":[\\\"x\\\",\\\"y\\\",\\\"z\\\"]}\"}\n\nevent: response.completed")
+        assertEquals(listOf("x", "y", "z"), OpenAiResponseParsing.candidates(OpenAiResponseParsing.finishedResponse(withDone).response, 500), "done text wins over deltas")
+    }
+
     @Test fun streamFailureSurfacesCode() {
         val stream = "event: response.failed\ndata: " + JSONObject().put("type", "response.failed").put("response",
             JSONObject().put("status", "failed").put("error", JSONObject().put("code", "server_error"))).toString() + "\n\n"

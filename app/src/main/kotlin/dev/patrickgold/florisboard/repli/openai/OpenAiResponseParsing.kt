@@ -73,6 +73,10 @@ object OpenAiResponseParsing {
     private fun finalResponseFromStream(stream: String): JSONObject {
         var completed: JSONObject? = null
         var failure: OpenAiException? = null
+        // The plan route delivers the text in response.output_text.delta events; the final
+        // response.completed object may omit output content, so the deltas are kept as well.
+        val deltas = StringBuilder()
+        var doneText: String? = null
         val data = StringBuilder()
         fun flush() {
             if (data.isEmpty()) return
@@ -81,6 +85,8 @@ object OpenAiResponseParsing {
             if (raw == "[DONE]") return
             val event = runCatching { JSONObject(raw) }.getOrNull() ?: return
             when (event.optString("type")) {
+                "response.output_text.delta" -> deltas.append(event.optString("delta"))
+                "response.output_text.done" -> doneText = event.optString("text").takeIf(String::isNotEmpty)
                 "response.completed", "response.incomplete" -> completed = event.optJSONObject("response")
                 "response.failed" -> {
                     val response = event.optJSONObject("response")
@@ -99,8 +105,15 @@ object OpenAiResponseParsing {
         }
         flush()
         failure?.let { throw it }
-        return completed ?: throw OpenAiException(OpenAiFailure.INVALID_RESPONSE, "Stream ended without a completed response")
+        val response = completed ?: throw OpenAiException(OpenAiFailure.INVALID_RESPONSE, "Stream ended without a completed response")
+        if (!hasOutputText(response)) {
+            val streamed = doneText ?: deltas.toString()
+            if (streamed.isNotEmpty()) response.put("output_text", streamed)
+        }
+        return response
     }
+
+    private fun hasOutputText(response: JSONObject): Boolean = runCatching { outputText(response) }.isSuccess
 
     fun outputText(response: JSONObject): String {
         response.optString("output_text").takeIf { response.has("output_text") && it.isNotEmpty() }?.let { return it }
