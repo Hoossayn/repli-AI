@@ -8,16 +8,7 @@
     <string name="repli_learning_clear_summary">Delete saved words and phrase counts from this device</string>
     <string name="repli_learning_clear_confirm">Delete Repli\'s learned words and phrases?</string>
     <string name="repli_learning_clear_action">Delete</string>
-    <string name="repli_account__title">Repli account</string>
-    <string name="repli_account__description">Sign in to generate Repli replies in the cloud. Keyboard typing, word suggestions, and adaptive learning stay on-device. Captured chat images may be read by Repli AI when cloud capture is available. You review the resulting messages and approve the exact reply request before it is sent.</string>
-    <string name="repli_account__email">Email</string>
-    <string name="repli_account__password">Password</string>
-    <string name="repli_account__sign_in">Sign in</string>
-    <string name="repli_account__create_account">Create account</string>
-    <string name="repli_account__sign_out">Sign out</string>
-    <string name="repli_account__signed_in_as">Signed in as {email}</string>
-    <string name="repli_account__not_configured_title">Cloud replies unavailable</string>
-    <string name="repli_account__not_configured_summary">This build has no Repli backend/Firebase configuration. On-device typing still works.</string>
+    <string name="repli_chatgpt__title">ChatGPT &amp; API key</string>
     <string name="repli_chats__title">Repli chats</string>
     <string name="repli_chats__saved_title">Saved chats</string>
     <string name="repli_chats__empty_title">No saved chats yet</string>
@@ -115,8 +106,7 @@
     <string name="repli_reply__idle_ambiguous">Several recent chats · use screen capture</string>
     <string name="repli_reply__idle_capture_saved_chat">Capture this chat to suggest replies</string>
     <string name="repli_reply__idle_default">Suggest replies · saving a chat is optional</string>
-    <string name="repli_reply__cloud_not_configured">Cloud replies aren\'t configured in this build.</string>
-    <string name="repli_reply__cloud_disabled">Enable cloud replies in Repli settings to generate.</string>
+    <string name="repli_reply__cloud_disabled">Turn on AI replies in Repli settings to generate.</string>
     <string name="repli_reply__cloud_sign_in">Connect ChatGPT or an API key in Repli to generate AI replies.</string>
     <string name="repli_reply__no_internet">No internet connection. Connect and try again.</string>
     <string name="repli_reply__preparing">Preparing your Repli ideas…</string>

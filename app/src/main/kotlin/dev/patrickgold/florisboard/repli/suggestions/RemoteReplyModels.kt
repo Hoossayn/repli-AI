@@ -1,12 +1,20 @@
 package dev.patrickgold.florisboard.repli.suggestions
 
 import dev.patrickgold.florisboard.repli.capture.ConversationTurn
+import dev.patrickgold.florisboard.repli.capture.VisualBubble
 import dev.patrickgold.florisboard.repli.profile.LearnedStyleSnapshot
 import dev.patrickgold.florisboard.repli.profile.LearnedTextingStyle
 import dev.patrickgold.florisboard.repli.profile.VoiceStyle
 import dev.patrickgold.florisboard.repli.persona.Persona
 import kotlin.math.abs
 import java.util.TimeZone
+
+/** What AI reading of a capture produced: bubbles (v3) or plain turns, plus the chat title if visible. */
+data class AiConversationContext(
+    val turns: List<ConversationTurn>,
+    val contactName: String?,
+    val bubbles: List<VisualBubble>? = null,
+)
 
 enum class ReplyIntent(val wireValue: String) { REPLY("reply"), FRESH_START("fresh_start") }
 

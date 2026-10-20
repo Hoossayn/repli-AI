@@ -50,7 +50,7 @@ import dev.patrickgold.florisboard.app.settings.repli.RepliCard
 import dev.patrickgold.florisboard.app.settings.repli.RepliLabel
 import dev.patrickgold.florisboard.app.settings.repli.RepliStyle
 import dev.patrickgold.florisboard.lib.util.InputMethodUtils
-import dev.patrickgold.florisboard.repli.account.RepliFirebaseAccountManager
+import dev.patrickgold.florisboard.repli.openai.auth.ChatGptAccountManager
 import dev.patrickgold.florisboard.repli.account.RepliWelcomePreferences
 import kotlinx.coroutines.launch
 
@@ -61,9 +61,17 @@ fun RepliOnboardingScreen() {
     val context = LocalContext.current
     val activity = context as Activity
     val navController = LocalNavController.current
-    val account by RepliFirebaseAccountManager.state.collectAsState()
+    val account by ChatGptAccountManager.state.collectAsState()
     val prefs by FlorisPreferenceStore
     val scope = rememberCoroutineScope()
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) scope.launch { ChatGptAccountManager.completePendingSignIn() }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     val enabled by InputMethodUtils.observeIsFlorisboardEnabled(foregroundOnly = true)
     val selected by InputMethodUtils.observeIsFlorisboardSelected(foregroundOnly = true)
     var step by rememberSaveable { mutableIntStateOf(0) }
@@ -222,33 +230,24 @@ fun RepliOnboardingScreen() {
                     Spacer(Modifier.height(38.dp))
                     OnboardingTitle("Make it yours.")
                     Spacer(Modifier.height(12.dp))
-                    RepliLabel("Sign in to save your chats and personas, and get Repli ideas that sound like you.",
+                    RepliLabel("Repli is open source and has no servers. AI replies run on your own ChatGPT Plus or Pro plan — nothing is billed by Repli.",
                         16, RepliStyle.muted)
                     Spacer(Modifier.height(32.dp))
-                    if (account.signedIn) {
-                        OnboardingNote("You’re signed in", "You’re ready to use Repli.")
-                    } else {
-                        RepliAction("Continue with Google", {
-                            scope.launch { RepliFirebaseAccountManager.signInWithGoogle(activity) }
-                        }, filled = false, enabled = account.configured && !account.busy,
-                            iconRes = R.drawable.ic_repli_google)
-                        Spacer(Modifier.height(10.dp))
-                        RepliAction("Continue with Apple", {
-                            scope.launch { RepliFirebaseAccountManager.signInWithApple(activity) }
-                        }, filled = false, enabled = account.configured && !account.busy,
-                            iconRes = R.drawable.ic_repli_apple, iconTint = RepliStyle.ink)
+                    when {
+                        account.planAllowed -> OnboardingNote("Using ChatGPT plan", "Signed in as ${account.email ?: "your ChatGPT account"}. You’re ready to use Repli.")
+                        account.finishPending -> RepliAction(if (account.busy) "Finishing…" else "Finish signing in", {
+                            scope.launch { ChatGptAccountManager.completePendingSignIn() }
+                        }, filled = false, enabled = !account.busy)
+                        else -> RepliAction(if (account.busy) "Waiting for ChatGPT…" else "Continue with ChatGPT", {
+                            scope.launch { ChatGptAccountManager.signIn(context) }
+                        }, filled = false, enabled = !account.busy)
                     }
                     account.errorMessage?.let {
                         Spacer(Modifier.height(10.dp))
                         RepliLabel(it, 13, RepliStyle.ink)
                     }
-                    if (!account.configured) {
-                        Spacer(Modifier.height(10.dp))
-                        RepliLabel("Sign-in is unavailable in this build. You can still use the keyboard.",
-                            13, RepliStyle.muted)
-                    }
                     Spacer(Modifier.height(16.dp))
-                    RepliLabel("Generating with Repli needs an account and internet. Typing and suggestions work on your phone.",
+                    RepliLabel("No ChatGPT plan? You can add your own OpenAI API key later in Repli settings. Typing and suggestions work on your phone without either.",
                         13, RepliStyle.muted)
                 }
             }
@@ -257,7 +256,7 @@ fun RepliOnboardingScreen() {
             RepliAction("Get started", { step = 1 })
         } else {
             RepliAction(if (step == LAST_STEP) {
-                if (account.signedIn) "Finish setup" else "Explore without an account"
+                if (account.planAllowed) "Finish setup" else "Skip for now"
             } else "Continue", {
                 if (step == LAST_STEP) finish() else step++
             })

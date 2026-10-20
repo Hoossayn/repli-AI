@@ -111,7 +111,8 @@ class DirectReplyEngines(
         OpenAiFailure.UNAVAILABLE -> CloudReplyFailure.UNAVAILABLE
     }
 
-    private companion object {
+    companion object {
+        const val MAX_IMAGES = ReplyPromptBuilder.MAX_VISION_IMAGES
         const val MAX_IMAGE_BYTES = 8_000_000
         const val MAX_TOTAL_IMAGE_BYTES = 24_000_000
     }

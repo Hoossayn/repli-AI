@@ -28,7 +28,7 @@ import android.widget.Toast
 import dev.patrickgold.florisboard.lib.devtools.flogDebug
 import dev.patrickgold.florisboard.lib.devtools.flogError
 import dev.patrickgold.florisboard.repli.identity.CapturedContactName
-import dev.patrickgold.florisboard.repli.suggestions.ServerMediatedContextEngine
+import dev.patrickgold.florisboard.repli.openai.DirectReplyEngines
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
@@ -583,8 +583,8 @@ class ReplyScreenCaptureService : Service() {
         private const val PAGE_CAPTURE_SETTLE_MS = 1_200L
         private const val VISION_MAX_DIMENSION = 3_072
         private const val VISION_FRAME_BYTE_BUDGET =
-            ServerMediatedContextEngine.MAX_TOTAL_IMAGE_BYTES /
-                ServerMediatedContextEngine.MAX_IMAGES
+            DirectReplyEngines.MAX_TOTAL_IMAGE_BYTES /
+                DirectReplyEngines.MAX_IMAGES
         private const val VISUAL_CHANGE_THRESHOLD = 6
 
         internal fun requestCaptureView(context: Context, requestId: String) {

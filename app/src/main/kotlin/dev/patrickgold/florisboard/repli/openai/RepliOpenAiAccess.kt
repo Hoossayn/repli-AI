@@ -36,9 +36,19 @@ object RepliOpenAiAccess : OpenAiCredentialProvider {
     val configured: Boolean get() = route() != null
 
     override suspend fun credentialForRequest(): OpenAiCredential? {
-        ChatGptAccountManager.credentialForRequest()?.let { return it }
+        ChatGptAccountManager.credentialForRequest()?.let { return it.copy(preferredModel = preferredPlanModel) }
         return apiKeyStore?.load()?.let { OpenAiCredential.ApiKey(it.key, it.model) }
     }
+
+    /** The plan model the user picked on the plan screen; null means the first model OpenAI lists. */
+    var preferredPlanModel: String?
+        get() = appContext.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE).getString(KEY_PLAN_MODEL, null)?.takeIf(String::isNotBlank)
+        set(value) {
+            appContext.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE).edit().putString(KEY_PLAN_MODEL, value?.takeIf(String::isNotBlank)).apply()
+        }
+
+    private const val PREFERENCES = "repli_openai"
+    private const val KEY_PLAN_MODEL = "plan_model"
 
     fun apiKeys(): OpenAiApiKeyStore = checkNotNull(apiKeyStore) { "RepliOpenAiAccess.initialize first" }
 

@@ -38,8 +38,9 @@ val projectVersionNameSuffix = projectVersionName.substringAfter("-", "").let { 
     }
 }
 
-// Repli account/backend: public mobile config only. Never put OPENAI_API_KEY,
-// backend signing secrets, or Firebase Admin credentials here or in resources.
+// Repli has no backend. The only build-time config is Firebase's public mobile config for
+// Crashlytics (optional). Never put an OpenAI key or any secret here or in resources: AI
+// calls use the user's own ChatGPT plan or API key, entered on the device.
 val repliLocalProperties = Properties().apply {
     val configFile = rootProject.file("firebase.local.properties")
     if (configFile.isFile) configFile.inputStream().use { load(it) }
@@ -47,12 +48,10 @@ val repliLocalProperties = Properties().apply {
 fun repliMobileConfig(name: String): String = providers.gradleProperty(name)
     .orElse(providers.environmentVariable(name))
     .getOrElse(repliLocalProperties.getProperty(name, ""))
-val repliBackendUrl = repliMobileConfig("ASSISTED_REPLY_BACKEND_URL")
 val repliFirebaseApiKey = repliMobileConfig("ASSISTED_FIREBASE_API_KEY")
 val repliFirebaseAppId = repliMobileConfig("ASSISTED_FIREBASE_APPLICATION_ID")
 val repliFirebaseDebugAppId = repliMobileConfig("ASSISTED_FIREBASE_APPLICATION_ID_DEBUG")
 val repliFirebaseProjectId = repliMobileConfig("ASSISTED_FIREBASE_PROJECT_ID")
-val repliGoogleWebClientId = repliMobileConfig("ASSISTED_GOOGLE_WEB_CLIENT_ID")
 fun String.asBuildConfigString(): String = replace("\\", "\\\\").replace("\"", "\\\"")
 
 kotlin {
@@ -88,13 +87,10 @@ configure<ApplicationExtension> {
         buildConfigField("String", "BUILD_COMMIT_HASH", "\"${getGitCommitHash().get()}\"")
         buildConfigField("String", "FLADDONS_API_VERSION", "\"v~draft2\"")
         buildConfigField("String", "FLADDONS_STORE_URL", "\"beta.addons.florisboard.org\"")
-        // Repli cloud replies: first-party HTTPS endpoint only, never an OpenAI endpoint/key.
-        buildConfigField("String", "REPLI_BACKEND_URL", "\"${repliBackendUrl.asBuildConfigString()}\"")
         // Firebase public mobile config; server credentials stay off-device.
         buildConfigField("String", "REPLI_FIREBASE_API_KEY", "\"${repliFirebaseApiKey.asBuildConfigString()}\"")
         buildConfigField("String", "REPLI_FIREBASE_APP_ID", "\"${repliFirebaseAppId.asBuildConfigString()}\"")
         buildConfigField("String", "REPLI_FIREBASE_PROJECT_ID", "\"${repliFirebaseProjectId.asBuildConfigString()}\"")
-        buildConfigField("String", "REPLI_GOOGLE_WEB_CLIENT_ID", "\"${repliGoogleWebClientId.asBuildConfigString()}\"")
 
         sourceSets {
             maybeCreate("main").apply {
@@ -234,13 +230,9 @@ dependencies {
     implementation(libs.patrickgold.jetpref.datastore.ui)
     implementation(libs.patrickgold.jetpref.material.ui)
     implementation(platform(libs.firebase.bom))
-    implementation(libs.firebase.auth)
     implementation(libs.firebase.crashlytics)
-    implementation(libs.androidx.credentials)
     // Custom Tabs for Sign in with ChatGPT (loopback redirect comes back to the app).
     implementation(libs.androidx.browser)
-    implementation(libs.androidx.credentials.play.services.auth)
-    implementation(libs.googleid)
     implementation(libs.mlkit.text.recognition)
 
     implementation(projects.lib.android)

@@ -51,7 +51,6 @@ import dev.patrickgold.florisboard.app.ext.ExtensionListScreenType
 import dev.patrickgold.florisboard.app.ext.ExtensionViewScreen
 import dev.patrickgold.florisboard.app.settings.HomeScreen
 import dev.patrickgold.florisboard.app.settings.about.AboutScreen
-import dev.patrickgold.florisboard.app.settings.account.RepliAccountScreen
 import dev.patrickgold.florisboard.app.settings.account.RepliOnboardingScreen
 import dev.patrickgold.florisboard.app.settings.repli.ChatGptPlanScreen
 import dev.patrickgold.florisboard.app.settings.repli.OpenAiApiKeyScreen
@@ -206,10 +205,6 @@ object Routes {
         @Serializable
         @Deeplink("settings/about")
         object About
-
-        @Serializable
-        @Deeplink("settings/account")
-        object Account
 
         @Serializable
         @Deeplink("settings/repli-welcome")
@@ -374,7 +369,6 @@ object Routes {
             composableWithDeepLink(Settings.Restore::class) { RestoreScreen() }
 
             composableWithDeepLink(Settings.About::class) { AboutScreen() }
-            composableWithDeepLink(Settings.Account::class) { RepliAccountScreen() }
             composableWithDeepLink(Settings.RepliWelcome::class) { RepliOnboardingScreen() }
             composableWithDeepLink(Settings.RepliChats::class) { RepliChatsScreen() }
             composable<Settings.RepliPersonas> { RepliPersonasScreen() }

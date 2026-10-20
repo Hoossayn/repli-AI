@@ -20,10 +20,15 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import dev.patrickgold.florisboard.app.LocalNavController
 import dev.patrickgold.florisboard.app.Routes
+import dev.patrickgold.florisboard.repli.openai.OpenAiException
+import dev.patrickgold.florisboard.repli.openai.OpenAiModel
+import dev.patrickgold.florisboard.repli.openai.OpenAiPlanClient
 import dev.patrickgold.florisboard.repli.openai.RepliOpenAiAccess
 import dev.patrickgold.florisboard.repli.openai.auth.ChatGptAccountManager
 import dev.patrickgold.florisboard.repli.openai.auth.ChatGptOAuthConfig
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * "Use your ChatGPT plan": the only sign-in Repli has. Wording follows OpenAI's Sign in with
@@ -52,6 +57,26 @@ fun ChatGptPlanScreen() {
         )
     }
 
+    if (chooseModel && models != null) {
+        RepliSheet(onDismiss = { chooseModel = false }) {
+            Spacer(Modifier.height(18.dp))
+            RepliLabel("Choose a model", 20, RepliStyle.ink, bold = true)
+            Spacer(Modifier.height(6.dp))
+            RepliLabel("Models your ChatGPT plan offers, in ChatGPT's order. Replies and screenshot reading use the same model.", 13, RepliStyle.muted)
+            Spacer(Modifier.height(14.dp))
+            RepliAction("Automatic (first listed)", {
+                RepliOpenAiAccess.preferredPlanModel = null; preferredModel = null; chooseModel = false
+            }, filled = preferredModel == null)
+            models!!.forEach { model ->
+                Spacer(Modifier.height(8.dp))
+                RepliAction(if (model.displayName != model.slug) "${model.displayName} · ${model.slug}" else model.slug, {
+                    RepliOpenAiAccess.preferredPlanModel = model.slug; preferredModel = model.slug; chooseModel = false
+                }, filled = preferredModel == model.slug)
+            }
+            Spacer(Modifier.height(24.dp))
+        }
+    }
+
     RepliPage {
         RepliLabel("Use your ChatGPT plan", 27, RepliStyle.ink, bold = true)
         Spacer(Modifier.height(6.dp))
@@ -68,8 +93,27 @@ fun ChatGptPlanScreen() {
                     RepliLabel("Using ChatGPT plan", 18, RepliStyle.ink, bold = true)
                     Spacer(Modifier.height(6.dp))
                     RepliLabel("Signed in as ${account.email ?: account.name ?: "your ChatGPT account"}", 14, RepliStyle.muted)
+                    Spacer(Modifier.height(6.dp))
+                    RepliLabel("Model · " + (preferredModel ?: "first model ChatGPT lists"), 14, RepliStyle.muted)
                     Spacer(Modifier.height(12.dp))
                     RepliAction("Manage usage", { openUrl(context, ChatGptOAuthConfig.MANAGE_USAGE_URL) })
+                    Spacer(Modifier.height(8.dp))
+                    RepliAction(if (models == null && modelStatus != null) modelStatus!! else "Choose model", {
+                        modelStatus = "Loading models…"
+                        scope.launch {
+                            try {
+                                val credential = ChatGptAccountManager.credentialForRequest()
+                                    ?: throw IllegalStateException("Sign in with ChatGPT first")
+                                models = withContext(Dispatchers.IO) { OpenAiPlanClient().listModels(credential).filter { it.listed } }
+                                modelStatus = null
+                                chooseModel = true
+                            } catch (error: OpenAiException) {
+                                modelStatus = error.failure.label
+                            } catch (error: Exception) {
+                                modelStatus = error.message ?: "Couldn't load models"
+                            }
+                        }
+                    }, filled = false, enabled = !account.busy)
                     Spacer(Modifier.height(8.dp))
                     RepliAction("Sign out of ChatGPT", { scope.launch { ChatGptAccountManager.signOut() } },
                         filled = false, enabled = !account.busy)

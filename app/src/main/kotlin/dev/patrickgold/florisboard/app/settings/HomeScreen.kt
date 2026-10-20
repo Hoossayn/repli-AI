@@ -82,8 +82,8 @@ fun HomeScreen() = FlorisScreen {
         )
         Preference(
             icon = Icons.Default.AccountCircle,
-            title = stringRes(R.string.repli_account__title),
-            onClick = { navController.navigate(Routes.Settings.Account) },
+            title = stringRes(R.string.repli_chatgpt__title),
+            onClick = { navController.navigate(Routes.Settings.ChatGptPlan) },
         )
         Preference(
             icon = Icons.Default.Chat,

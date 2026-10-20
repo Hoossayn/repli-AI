@@ -1,9 +1,5 @@
 # Public Firebase mobile configuration only; copy to firebase.local.properties.
-# Never add OpenAI keys, backend signing secrets, or Firebase Admin private keys.
 ASSISTED_FIREBASE_API_KEY=
 ASSISTED_FIREBASE_APPLICATION_ID=
 ASSISTED_FIREBASE_APPLICATION_ID_DEBUG=
 ASSISTED_FIREBASE_PROJECT_ID=
-ASSISTED_GOOGLE_WEB_CLIENT_ID=
-# Complete HTTPS endpoint; leave blank to use on-device replies only.
-ASSISTED_REPLY_BACKEND_URL=https://repli-backend.onrender.com/v1/reply-candidates

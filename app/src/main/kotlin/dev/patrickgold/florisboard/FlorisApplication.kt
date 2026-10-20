@@ -43,7 +43,6 @@ import dev.patrickgold.florisboard.lib.crashutility.CrashUtility
 import dev.patrickgold.florisboard.lib.devtools.Flog
 import dev.patrickgold.florisboard.lib.devtools.LogTopic
 import dev.patrickgold.florisboard.lib.devtools.flogError
-import dev.patrickgold.florisboard.repli.account.RepliFirebaseAccountManager
 import dev.patrickgold.florisboard.repli.diagnostics.RepliCrashReporting
 import dev.patrickgold.florisboard.repli.openai.RepliOpenAiAccess
 import dev.patrickgold.jetpref.datastore.runtime.initAndroid
@@ -128,6 +127,10 @@ class FlorisApplication : Application() {
 
             init()
         } catch (e: Exception) {
+            // Staged exceptions surface only when the IME asks for them; in the app they look like a
+            // splash screen that never dismisses. Log loudly, and in debug builds fail fast instead.
+            Log.e("FlorisApplication", "onCreate failed; start-up was cut short", e)
+            if (BuildConfig.DEBUG) throw e
             CrashUtility.stageException(e)
             return
         }
@@ -150,7 +153,6 @@ class FlorisApplication : Application() {
         }
         clipboardManager.value.initializeForContext(this)
         DictionaryManager.init(this)
-        RepliFirebaseAccountManager.initialize(this)
         // After CrashUtility so Crashlytics chains to FlorisBoard's own crash handler.
         RepliCrashReporting.initialize(this)
     }
