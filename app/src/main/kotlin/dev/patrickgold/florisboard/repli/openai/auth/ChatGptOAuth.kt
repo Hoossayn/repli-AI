@@ -83,7 +83,9 @@ enum class OAuthFailure(val label: String) {
     PLAN_NOT_GRANTED("ChatGPT plan usage wasn't allowed for Repli"),
     INVALID_TOKEN("ChatGPT returned a token Repli couldn't verify"),
     UNAVAILABLE("ChatGPT sign-in is unavailable right now"),
-    CONNECTION("Couldn't reach ChatGPT"),
+    CONNECTION("Couldn't reach ChatGPT · check your connection"),
+    /** Not an error: the code is held until the app is in the foreground and can use the network. */
+    FINISH_IN_APP("Return to Repli to finish signing in"),
 }
 
 class OAuthException(val failure: OAuthFailure, message: String, cause: Throwable? = null) : Exception(message, cause)

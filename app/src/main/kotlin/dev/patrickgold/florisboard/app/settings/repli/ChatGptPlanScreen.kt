@@ -8,13 +8,16 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import dev.patrickgold.florisboard.app.LocalNavController
 import dev.patrickgold.florisboard.app.Routes
 import dev.patrickgold.florisboard.repli.openai.RepliOpenAiAccess
@@ -32,7 +35,7 @@ fun ChatGptPlanScreen() {
     val navController = LocalNavController.current
     val scope = rememberCoroutineScope()
     val account by ChatGptAccountManager.state.collectAsState()
-    val apiKey = remember(account.planAllowed) { RepliOpenAiAccess.apiKeys().load() }
+    val apiKey = RepliOpenAiAccess.apiKeys().load()
 
     if (account.welcomePending) {
         AlertDialog(
@@ -70,6 +73,14 @@ fun ChatGptPlanScreen() {
                     Spacer(Modifier.height(8.dp))
                     RepliAction("Sign out of ChatGPT", { scope.launch { ChatGptAccountManager.signOut() } },
                         filled = false, enabled = !account.busy)
+                }
+                account.finishPending -> {
+                    RepliLabel(if (account.busy) "Finishing sign-in…" else "Almost done", 18, RepliStyle.ink, bold = true)
+                    Spacer(Modifier.height(6.dp))
+                    RepliLabel("ChatGPT approved Repli. One more step completes the connection now that Repli is open.", 14, RepliStyle.muted)
+                    Spacer(Modifier.height(12.dp))
+                    RepliAction(if (account.busy) "Finishing…" else "Finish signing in",
+                        { scope.launch { ChatGptAccountManager.completePendingSignIn() } }, enabled = !account.busy)
                 }
                 account.signedIn -> {
                     RepliLabel("Plan usage not allowed", 18, RepliStyle.ink, bold = true)
