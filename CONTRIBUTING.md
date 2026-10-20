@@ -1,76 +1,32 @@
-# Contribution guidelines
+# Contributing to Repli Keyboard
 
-Thanks for considering contributing to FlorisBoard!
+Thanks for your interest. Repli is a FlorisBoard fork with its own reply, rewrite and suggestion features; the keyboard itself is FlorisBoard's. Please keep contributions in English and follow the [code of conduct](CODE_OF_CONDUCT.md) and the [AI policy](AI_POLICY.md).
 
-There are several ways to contribute to FlorisBoard. This document provides some general guidelines for each type of contribution.
+## Where things live
 
-The FlorisBoard community is international, as such we require all contributions, including issues, pull requests, and participation in the Matrix chat to be in English, follow the [code of conduct](https://github.com/florisboard/florisboard/blob/main/CODE_OF_CONDUCT.md), and adhere to our current [AI Policy](https://github.com/florisboard/florisboard/blob/main/AI_POLICY.md). Contributions not adhering to these requirements will be dismissed. Thanks for making the FlorisBoard community an inclusive and safe space for everyone!
+- `app/src/main/kotlin/dev/patrickgold/florisboard/repli/` — Repli: capture, review, replies, rewrite, personas, chats, diagnostics.
+- `repli/openai/` — the device-direct OpenAI client (prompts, response parsing, failure mapping) and, under `auth/`, Sign in with ChatGPT. These files have no Android imports apart from the storage and screen adapters, so they run under plain JVM tests.
+- `ime/nlp/latin/repli/` — the on-device suggestion and autocorrect engine (lexicon, n-gram prior, adaptive model, key-proximity correction).
+- `app/settings/repli/` — Repli's screens; `app/settings/account/` — onboarding.
+- Everything else is FlorisBoard. Prefer fixing keyboard-level bugs upstream unless they come from Repli's changes.
 
-## Non-code contributions
+## Building and testing
 
-### Translations
+Android SDK 37 and JDK 17. `./gradlew :app:assembleDebug` builds; `./gradlew :app:testDebugUnitTest` runs the unit tests, which include the OpenAI client, the OAuth flow and the suggestion engine. No configuration files or keys are needed. Crash reporting is optional (see the README).
 
-To make FlorisBoard accessible in as many languages as possible, the platform [Crowdin](https://crowdin.florisboard.org) is used to crowdsource and manage translations.  The list of languages in Crowdin covers a good range of languages, but feel free to email [florisboard@patrickgold.dev](mailto:florisboard@patrickgold.dev) to request a new language.
+Test AI features on a device with your own ChatGPT plan or API key. Anything that changes what is sent to OpenAI must update [docs/repli-privacy.md](docs/repli-privacy.md) in the same pull request.
 
-> [!IMPORTANT]
-> This is the only source of translations - **PRs that add/update translations are not accepted.**
+## Pull requests
 
-### Bug reporting
+- One change per pull request, with a short description of what and why.
+- Add or update a unit test when the change is testable without a device; say what you checked on a device when it isn't.
+- Never include tokens, API keys, screenshots of real chats, or logs containing them. `_logs/` and `_transfer/` are git-ignored for a reason.
+- Mention AI assistance in one line, per the AI policy.
 
-Allows us to see where FlorisBoard has flaws and should be improved to maximize stability and user experience. To make this process as smooth as possible, please use the pre-made [bug report template](https://github.com/florisboard/florisboard/issues/new?template=bug_report.yml). This makes it easy for us to understand what the bug is and how to solve it.
+## Reporting bugs
 
-#### Capturing error logs
+Open an issue with the device, Android version, Repli version (Settings → About), the steps, and — for reply or capture problems — the **Diagnostics** card from Settings → Repli and the relevant `RepliOpenAI:` / `RepliChatGpt:` lines from logcat. Those lines contain only closed failure codes, never content.
 
-Logs are captured by FlorisBoard's crash handler, which gives you the ability to copy it to the clipboard and paste it in the crash report [issue template](https://github.com/florisboard/florisboard/issues/new?template=crash_report.yml). This is the preferred way to capture logs.
+## Translations and keyboard layouts
 
-Alternatively, you can also use ADB (Android Debug Bridge) to capture the error log. This is recommended for experienced users only.
-
-### Feature proposals
-
-Use the feature proposal [issue template](https://github.com/florisboard/florisboard/issues/new?template=feature_request.yml) to suggest a new idea or improvement for this project.
-
-### Feedback
-
-You can [give general feedback](https://github.com/florisboard/florisboard/discussions/new?category=feedback) directly here on GitHub. This is the preferred way to give feedback, as it allows not only for me to read and respond to feedback, but for everyone in this community.
-
-## Code contributions
-
-You are always welcome to contribute new features or work on existing issues, there are a lot to choose from :) It is always best to quickly ask if someone is already working on this issue to avoid duplicate issues.
-
-> [!NOTE]
-> If you intend to implement a bigger feature please coordinate with us so we can prevent that there's a major difference in expected implementation.
-
-If you are overwhelmed by the code don't hesitate to ask for help in the [dev chat](https://matrix.to/#/#florisboard-dev:matrix.org) or the discussions tab! Some issues are also marked as good first issue, which are easy to do tasks.
-
-### System requirements for development
-
-- Desktop PC with Linux or WSL2 (Windows)
-  - MacOS and Windows without WSL2 probably works too however there's no official support
-- At least 16GB of RAM (because of Android Studio / IntelliJ)
-- The following tools must be installed:
-  - Android Studio (bundles SDK and NDK) or IntelliJ with Android and Compose plugin
-  - Java 17
-  - CMake 3.22+
-  - Clang 15+
-  - Git
-  - [Rust](https://www.rust-lang.org/tools/install)
-- Utilities (optional)
-  - Python 3.10+
-  - Bash, realpath, grep, ...
-
-> [!IMPORTANT]
-> If using IntelliJ IDEA you have to enable `Future AGP Versions` otherwise AGP 9.0.0 will not work with your IDE.
-> How to do this is described in this [comment on YouTrack](https://youtrack.jetbrains.com/issue/IDEA-348937/2024.1-Beta-missing-option-to-enable-sync-with-future-AGP-versions#focus=Comments-27-11721710.0-0)
-
-### Manual build without Android Studio
-
-If you want to manually build the project without Android Studio you must ensure that the Android SDK and NDK are properly installed on your system. Then issue
-
-```./gradlew clean && ./gradlew assembleDebug```
-
-and Gradle should take care of every build task.
-
-## Donating
-
-You can also show your support by buying me a coffee, so I can stay up all night and chase away bugs or add new cool stuff :)
-See the `Sponsors` button for available options!
+Repli currently ships English QWERTY only. Layout and translation work for the keyboard itself belongs upstream in FlorisBoard; Repli pulls it in by merging upstream.

@@ -1,21 +1,38 @@
 # Repli Keyboard privacy
 
-Repli Keyboard's English suggestion and autocorrect engine runs on the device. Its bundled dictionary is part of the app. The adaptive model learns words, short word sequences and the emoji you insert only when you commit text in eligible English text fields. It does not learn from password, email address, URL, no-suggestions, or incognito fields.
+Repli has no servers. The only network destinations are OpenAI (for AI features, under your own account) and, if the build is configured and you leave it on, Firebase Crashlytics for anonymous crash reports. This note says exactly what leaves the phone, when, and what stays.
 
-Touch-aware ranking keeps normalized key positions and nearby-key scores only for the current word in memory. It clears them when context, cursor, editor, or layout changes; touch samples are never saved or sent. Prediction diagnostics contain aggregate calculation counts, cache hits, and processing durations, without typed words or touch positions.
+## On the phone, always
 
-The learned model is bounded and saved in encrypted storage using Android Keystore. Its file is placed in Android's no-backup directory. You can turn learning off or delete learned words in **Settings → Typing → Adaptive learning**. Turning learning off stops using and updating that model; deleting clears the saved model.
+The English suggestion and autocorrect engine runs on the device with a bundled dictionary. The adaptive model learns words, short word sequences and the emoji you insert only when you commit text in eligible English fields — never in password, email address, URL, no-suggestions or incognito fields. Touch-aware ranking keeps key positions for the current word in memory only. The learned model is bounded, Keystore-encrypted, stored in the no-backup directory, and can be turned off or deleted under **Settings → Typing → Adaptive learning**.
 
-The keyboard theme uses Repli's warm ivory surfaces, indigo accent (`#6654D1`), and lilac highlights so the app and keyboard stay consistent.
+Chat profiles (names and persona choices) live in app preferences. Persona guides and example replies, recent notification senders, learned writing styles, pending captures and **chat memory** use Keystore-encrypted, no-backup storage. Chat memory is the approved turns of each saved chat, at most 120 per chat; it is used to give later replies continuity and to describe your writing style. Removing a chat deletes its memory. Screen frames are memory-only and erased after review or generation.
 
-Optional Repli account and cloud replies are off unless you sign in on the first-run page or under **Settings → Repli account** and the build is configured with a backend. Firebase handles Google, Apple, or email/password sign-in and exchanges its identity token for a short-lived Repli session. Tapping **Generate replies** sends reviewed chat text, optional direction, selected writing examples, and the opaque ID of the selected saved chat to the first-party HTTPS backend. The backend stores up to 120 approved text turns per account and chat, encrypted at rest. Later reply requests can send up to 24 earlier approved turns, five outgoing examples, and a short writing-style summary to the AI provider. The profile ID and contact name are not sent to the AI provider. Reply suggestions are generated only by that backend; the keyboard has no on-device reply model, so without a configured backend, sign-in or network no replies are generated. Ordinary typing, autocorrect, and adaptive keyboard learning stay on-device. Sign-out clears the in-memory session; removing a chat deletes its backend memory when connected, and account deletion removes all backend memory. Without backend/Firebase configuration the welcome page offers offline keyboard use.
+The notification listener (opt-in) reads posted notifications from major chat apps, but only WhatsApp/Telegram one-to-one conversations feed reply context. The guided-capture overlay observes only the foreground package and never inspects content, gestures, types or sends. Voice guidance uses the on-device recognizer; audio is never stored or uploaded.
 
-Chat profiles (names and selected persona IDs) live in app SharedPreferences; user-authored persona guides and example replies, recent notification senders, learned writing styles, and pending captures use Keystore-encrypted storage. The selected persona's name, guide, and up to three example replies are sent to the first-party backend and AI provider when you generate cloud replies; persona details are not added to backend profile memory. Screen frames are memory-only and erased after review/generation, Clear, or leaving the chat. The notification listener reads posted notifications from major chat apps but only WhatsApp/Telegram one-to-one conversations feed reply context. The guided-capture overlay observes only the foreground package and never inspects content, gestures, types, or sends. Voice guidance uses the on-device recognizer; audio is never stored or uploaded. Manage chats and personas under **Chats** and context options under **Settings → Repli replies**.
+## Your ChatGPT account
 
-Tapping **Rewrite** in the keyboard bar sends the text currently in the message box (up to 600 characters), the tone you chose, and the same style cues as cloud replies to the first-party backend, which asks the AI provider for three rewrites. Nothing else from the screen or the chat is sent, nothing is stored, and your text is only replaced when you tap a version.
+When you tap **Continue with ChatGPT**, your browser opens OpenAI's sign-in page. Repli registers itself with OpenAI as a locally hosted app and receives an OAuth token for your account; Repli never sees your ChatGPT password. The token, a refresh token, the ID token and the registration ID are stored Keystore-encrypted on the phone and are sent only to `auth.openai.com` (to refresh or revoke) and `api.openai.com` (as the Authorization header of AI requests). Signing out revokes the refresh token and deletes them from the phone; you can also disconnect Repli in ChatGPT settings → Usage. Repli keeps your email address and display name from the ID token to show who is signed in.
 
-When the build is configured with Firebase, the keyboard sends anonymous crash reports through Firebase Crashlytics: the stack trace, device model, OS version and app version. Typed text, captured chats, suggestions, learned words and account identifiers are never attached, and nothing is sent from debug builds. Turn this off under **Settings → Repli → Crash reports**; turning it off also discards any report not yet sent.
+If you use an OpenAI API key instead, it is stored the same way and sent only to `api.openai.com`.
 
-The keyboard inherits other FlorisBoard features, such as clipboard history and extension management. Those features have their own settings and storage behavior. The Repli suggestion and adaptive learning code does not send typed text to a server.
+## What is sent to OpenAI, and when
+
+Every request goes directly to `api.openai.com` with `store: false` (OpenAI's instruction not to retain the request). Nothing is sent until you tap the action.
+
+- **Reading a chat** (after you tap *Suggest replies* and allow capture): the cropped chat screenshot(s), up to four. OpenAI returns the visible messages, which you review before anything else happens.
+- **Generate replies** (after you review and approve): the reviewed chat text, any direction you added, up to 24 earlier approved turns from this chat's on-device memory, up to five of your own earlier messages as style examples, a short style summary, the selected persona's name, guide and up to three examples, your reply intent, and your current local date/time with time zone (so greetings fit the hour). Contact names, app names, chat IDs and screenshots are **not** part of this request.
+- **Rewrite**: the text in the message box (up to 600 characters), the chosen tone and your style cues. No chat context, no memory, no screenshots.
+- **Choosing a model**: a request for the list of models your plan offers.
+
+Requests are billed to your ChatGPT plan (with any cap you set in ChatGPT settings → Usage) or to your API key. Repli stores nothing about the content of these requests beyond the on-device chat memory described above, and keeps only token counts in its local Diagnostics.
+
+## Crash reports
+
+If the build is configured with Firebase and you leave the setting on, Crashlytics receives the stack trace, device model, OS version and app version when the keyboard crashes. Typed text, captured chats, suggestions, learned words and account identifiers are never attached, and nothing is sent from debug builds. Turn it off under **Settings → Repli → Crash reports**.
+
+## Everything else
+
+The keyboard inherits other FlorisBoard features, such as clipboard history and extension management, with their own settings and storage. No part of Repli sends typed text to a Repli server, because there is none.
 
 Source code and issue reports: [Hoossayn/florisboard-repli](https://github.com/Hoossayn/florisboard-repli). Repli Keyboard is based on FlorisBoard; upstream information is at [florisboard.org](https://florisboard.org/).
