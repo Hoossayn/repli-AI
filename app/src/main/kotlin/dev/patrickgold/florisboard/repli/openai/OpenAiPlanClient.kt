@@ -76,7 +76,7 @@ fun interface OpenAiTransport {
     suspend fun send(request: OpenAiHttpRequest): OpenAiHttpResponse
 }
 
-data class OpenAiModel(val id: String, val slug: String, val listed: Boolean)
+data class OpenAiModel(val id: String, val slug: String, val listed: Boolean, val displayName: String = slug)
 
 data class OpenAiResult<T>(val value: T, val model: String, val usage: OpenAiUsage?, val requestId: String?)
 
@@ -117,13 +117,22 @@ class OpenAiPlanClient(
     suspend fun listModels(credential: OpenAiCredential): List<OpenAiModel> {
         val response = send(OpenAiHttpRequest("GET", "$baseUrl/models", headers(credential), null, MODELS_TIMEOUT_MILLIS))
         if (response.status !in 200..299) throw failureFor(response)
-        val data = runCatching { JSONObject(response.body).optJSONArray("data") }.getOrNull()
+        // The ChatGPT-plan route answers with a `models` array (slug, display_name, visibility);
+        // the standard API answers with `data` (id). Accept either, preserving server order.
+        val json = runCatching { JSONObject(response.body) }.getOrNull()
             ?: throw OpenAiException(OpenAiFailure.INVALID_RESPONSE, "Model list was not JSON")
+        val data = json.optJSONArray("models") ?: json.optJSONArray("data")
+            ?: throw OpenAiException(OpenAiFailure.INVALID_RESPONSE, "Model list had no models")
         return (0 until data.length()).mapNotNull { index ->
             val item = data.optJSONObject(index) ?: return@mapNotNull null
-            val id = item.optString("id").takeIf(String::isNotEmpty) ?: return@mapNotNull null
-            val slug = item.optString("slug").takeIf(String::isNotEmpty) ?: id
-            OpenAiModel(id, slug, listed = !item.has("visibility") || item.optString("visibility") == "list")
+            val slug = item.optString("slug").takeIf(String::isNotEmpty)
+            val id = item.optString("id").takeIf(String::isNotEmpty) ?: slug ?: return@mapNotNull null
+            OpenAiModel(
+                id = id,
+                slug = slug ?: id,
+                listed = !item.has("visibility") || item.optString("visibility") == "list",
+                displayName = item.optString("display_name").takeIf(String::isNotEmpty) ?: slug ?: id,
+            )
         }
     }
 

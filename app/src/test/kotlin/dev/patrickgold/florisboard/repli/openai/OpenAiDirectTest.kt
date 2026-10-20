@@ -205,8 +205,9 @@ class OpenAiPlanClientTest {
         override suspend fun send(request: OpenAiHttpRequest): OpenAiHttpResponse { requests += request; return handler(request) }
     }
 
-    private fun models(vararg entries: Pair<String, String>) = OpenAiHttpResponse(200, JSONObject().put("data", JSONArray().apply {
-        entries.forEach { (slug, visibility) -> put(JSONObject().put("id", "id-$slug").put("slug", slug).put("visibility", visibility)) }
+    /** Plan-route shape: a `models` array with slug/display_name/visibility and no `id`. */
+    private fun models(vararg entries: Pair<String, String>) = OpenAiHttpResponse(200, JSONObject().put("models", JSONArray().apply {
+        entries.forEach { (slug, visibility) -> put(JSONObject().put("slug", slug).put("display_name", slug.uppercase()).put("visibility", visibility)) }
     }).toString())
 
     private fun ok(text: String) = OpenAiHttpResponse(200, JSONObject().put("id", "resp_9").put("status", "completed").put("model", "gpt-6.1-sol")
@@ -311,6 +312,14 @@ class OpenAiPlanClientTest {
         try { timeout.rewrite(OpenAiCredential.ApiKey("k", "m"), RewritePrompt("hey", "casual", style())); fail() } catch (e: OpenAiException) { assertEquals(OpenAiFailure.TIMEOUT, e.failure) }
         val down = OpenAiPlanClient(FakeTransport { throw java.io.IOException("dns") }, "https://example.test/v1")
         try { down.rewrite(OpenAiCredential.ApiKey("k", "m"), RewritePrompt("hey", "casual", style())); fail() } catch (e: OpenAiException) { assertEquals(OpenAiFailure.CONNECTION, e.failure) }
+    }
+
+    @Test fun apiKeyModelListUsesStandardDataShape() = runBlocking {
+        val standard = OpenAiHttpResponse(200, JSONObject().put("data", JSONArray().put(JSONObject().put("id", "gpt-5-mini").put("object", "model"))).toString())
+        val client = OpenAiPlanClient(FakeTransport { standard }, "https://example.test/v1")
+        val listed = client.listModels(OpenAiCredential.ApiKey("k", "m"))
+        assertEquals(listOf("gpt-5-mini"), listed.map { it.id })
+        assertTrue(listed.single().listed)
     }
 
     @Test fun noListedModelFails() = runBlocking {

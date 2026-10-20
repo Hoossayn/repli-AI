@@ -1,5 +1,6 @@
 package dev.patrickgold.florisboard.repli.openai
 
+import dev.patrickgold.florisboard.lib.devtools.flogError
 import dev.patrickgold.florisboard.repli.capture.TurnSource
 import dev.patrickgold.florisboard.repli.capture.VisualBubble
 import dev.patrickgold.florisboard.repli.identity.CapturedContactName
@@ -88,6 +89,8 @@ class DirectReplyEngines(
     private inline fun <T> translating(credential: OpenAiCredential, block: () -> T): T = try {
         block()
     } catch (error: OpenAiException) {
+        // Closed fields only: failure class, API error code/param and our own message — never content or tokens.
+        flogError { "RepliOpenAI: ${error.failure} code=${error.apiCode} param=${error.apiParam} (${error.message})" }
         if (error.failure == OpenAiFailure.SIGN_IN_REQUIRED) {
             if (credential is OpenAiCredential.ChatGptPlan) onPlanTokenRejected()
             throw RemoteReplyAuthenticationException(error.message ?: "Sign in again")
