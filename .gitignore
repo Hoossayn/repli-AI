@@ -66,3 +66,7 @@ debug/
 target/
 **/*.rs.bk
 *.pdb
+
+# Device logs dropped in for debugging sessions
+_logs/
+_transfer/

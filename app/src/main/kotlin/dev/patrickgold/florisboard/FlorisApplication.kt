@@ -104,6 +104,9 @@ class FlorisApplication : Application() {
                 flogOutputs = Flog.OUTPUT_CONSOLE,
             )
             CrashUtility.install(this)
+            // Before ImeController: the reply flows resolve their AI route through this object.
+            // Never let it take the whole app down: without it the AI route just reads as "not connected".
+            runCatching { RepliOpenAiAccess.initialize(this) }.onFailure { flogError { "RepliOpenAiAccess.initialize failed: $it" } }
 
             storageController = AndroidStorageController(this)
             extensionController = ExtensionController(storageController)
@@ -148,7 +151,6 @@ class FlorisApplication : Application() {
         clipboardManager.value.initializeForContext(this)
         DictionaryManager.init(this)
         RepliFirebaseAccountManager.initialize(this)
-        RepliOpenAiAccess.initialize(this)
         // After CrashUtility so Crashlytics chains to FlorisBoard's own crash handler.
         RepliCrashReporting.initialize(this)
     }

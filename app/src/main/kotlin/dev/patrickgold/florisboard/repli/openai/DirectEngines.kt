@@ -31,7 +31,8 @@ fun interface OpenAiCredentialProvider {
  */
 class DirectReplyEngines(
     private val credentials: OpenAiCredentialProvider,
-    private val memory: ProfileMemoryStore?,
+    /** Resolved per request so constructing the engines (at IME start-up) touches no storage. */
+    private val memoryProvider: () -> ProfileMemoryStore?,
     private val client: OpenAiPlanClient = OpenAiPlanClient(),
     /** Called when api.openai.com rejected a ChatGPT-plan token, so the session layer can refresh or re-sign-in. */
     private val onPlanTokenRejected: () -> Unit = {},
@@ -41,6 +42,7 @@ class DirectReplyEngines(
         val credential = credentials.credentialForRequest()
             ?: throw RemoteReplyAuthenticationException("Sign in with ChatGPT or add an API key")
         val context = request.context.map { MemoryTurn(it.speaker == SharedSpeaker.ME, it.text) }
+        val memory = if (request.profileId != null) memoryProvider() else null
         val recall = request.profileId?.let { memory?.recall(it, context) }
         val style = request.style.toPrompt().let { if (recall == null) it else ProfileMemory.styleWithRecall(it, recall) }
         val prompt = ReplyPrompt(

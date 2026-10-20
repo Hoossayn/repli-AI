@@ -42,12 +42,17 @@ object RepliOpenAiAccess : OpenAiCredentialProvider {
 
     fun apiKeys(): OpenAiApiKeyStore = checkNotNull(apiKeyStore) { "RepliOpenAiAccess.initialize first" }
 
-    /** On-device chat memory shared by the reply flow and the Chats screen. */
+    /** On-device chat memory shared by the reply flow and the Chats screen; needs [initialize] to have run. */
     fun memory(): ProfileMemoryStore = cachedMemory ?: synchronized(this) {
         cachedMemory ?: ProfileMemoryStore(EncryptedProfileMemoryStorage(appContext)).also { cachedMemory = it }
     }
 
+    /** Safe to call before [initialize] (the IME controller is built early in Application.onCreate). */
     fun engines(): DirectReplyEngines = cachedEngines ?: synchronized(this) {
-        cachedEngines ?: DirectReplyEngines(this, memory(), onPlanTokenRejected = ChatGptAccountManager::invalidateAccessToken).also { cachedEngines = it }
+        cachedEngines ?: DirectReplyEngines(
+            credentials = this,
+            memoryProvider = { if (::appContext.isInitialized) memory() else null },
+            onPlanTokenRejected = ChatGptAccountManager::invalidateAccessToken,
+        ).also { cachedEngines = it }
     }
 }
