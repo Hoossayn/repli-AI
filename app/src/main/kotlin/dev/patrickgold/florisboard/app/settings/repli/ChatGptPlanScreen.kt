@@ -27,6 +27,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -56,7 +59,21 @@ fun ChatGptPlanScreen() {
     val navController = LocalNavController.current
     val scope = rememberCoroutineScope()
     val account by ChatGptAccountManager.state.collectAsState()
-    val apiKey = RepliOpenAiAccess.apiKeys().load()
+    val apiKey = remember(account.planAllowed) { RepliOpenAiAccess.apiKeys().load() }
+    var preferredModel by remember { mutableStateOf(RepliOpenAiAccess.preferredPlanModel) }
+    var models by remember { mutableStateOf<List<OpenAiModel>?>(null) }
+    var modelStatus by remember { mutableStateOf<String?>(null) }
+    var chooseModel by remember { mutableStateOf(false) }
+    // The browser hands the code to Repli while Repli is in the background, where Android may
+    // deny network access; the token exchange is finished here, once this screen is in front.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) scope.launch { ChatGptAccountManager.completePendingSignIn() }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     if (account.welcomePending) {
         AlertDialog(
