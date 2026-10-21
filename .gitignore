@@ -70,3 +70,6 @@ target/
 # Device logs dropped in for debugging sessions
 _logs/
 _transfer/
+
+# Generated from firebase.local.properties at build time (public mobile config, per developer)
+app/google-services.json

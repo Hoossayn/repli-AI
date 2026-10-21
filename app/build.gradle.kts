@@ -51,8 +51,51 @@ fun repliMobileConfig(name: String): String = providers.gradleProperty(name)
 val repliFirebaseApiKey = repliMobileConfig("ASSISTED_FIREBASE_API_KEY")
 val repliFirebaseAppId = repliMobileConfig("ASSISTED_FIREBASE_APPLICATION_ID")
 val repliFirebaseDebugAppId = repliMobileConfig("ASSISTED_FIREBASE_APPLICATION_ID_DEBUG")
+val repliFirebaseBetaAppId = repliMobileConfig("ASSISTED_FIREBASE_APPLICATION_ID_BETA")
 val repliFirebaseProjectId = repliMobileConfig("ASSISTED_FIREBASE_PROJECT_ID")
 fun String.asBuildConfigString(): String = replace("\\", "\\\\").replace("\"", "\\\"")
+
+// Crashlytics needs its Gradle plugin for build IDs and R8 mapping uploads, and that plugin
+// reads google-services.json. The file is generated here from the same public mobile config
+// (git-ignored), so the repository never carries a Firebase project and builds without one.
+val repliCrashlyticsConfigured = listOf(repliFirebaseApiKey, repliFirebaseAppId, repliFirebaseProjectId).all(String::isNotBlank)
+if (repliCrashlyticsConfigured) {
+    fun jsonString(value: String) = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+    fun client(packageName: String, appId: String) = """
+    {
+      "client_info": {
+        "mobilesdk_app_id": ${jsonString(appId)},
+        "android_client_info": { "package_name": ${jsonString(packageName)} }
+      },
+      "oauth_client": [],
+      "api_key": [ { "current_key": ${jsonString(repliFirebaseApiKey)} } ],
+      "services": { "appinvite_service": { "other_platform_oauth_client": [] } }
+    }"""
+    val projectNumber = repliFirebaseAppId.split(":").getOrNull(1).orEmpty()
+    // Every build type's package needs a client entry or the google-services plugin fails the
+    // build. Debug and beta fall back to the release app ID when no ID of their own is set, so
+    // reports still arrive (filed under the release app in the Firebase console).
+    val clients = listOf(
+        client("com.replyai.repli.keyboard", repliFirebaseAppId),
+        client("com.replyai.repli.keyboard.debug", repliFirebaseDebugAppId.ifBlank { repliFirebaseAppId }),
+        client("com.replyai.repli.keyboard.beta", repliFirebaseBetaAppId.ifBlank { repliFirebaseAppId }),
+        client("com.replyai.repli.keyboard.bench", repliFirebaseAppId),
+    )
+    val json = """{
+  "project_info": {
+    "project_number": ${jsonString(projectNumber)},
+    "project_id": ${jsonString(repliFirebaseProjectId)}
+  },
+  "client": [${clients.joinToString(",")}
+  ],
+  "configuration_version": "1"
+}
+"""
+    val target = layout.projectDirectory.file("google-services.json").asFile
+    if (!target.isFile || target.readText() != json) target.writeText(json)
+    apply(plugin = libs.plugins.google.services.get().pluginId)
+    apply(plugin = libs.plugins.firebase.crashlytics.get().pluginId)
+}
 
 kotlin {
     compilerOptions {

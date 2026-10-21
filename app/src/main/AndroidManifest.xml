@@ -247,6 +247,11 @@
                 tools:node="remove"/>
         </provider>
 
+        <!-- Crash reporting is opt-in: RepliCrashReporting turns collection on only when the
+             user's setting allows it and never in debug builds. -->
+        <meta-data
+            android:name="firebase_crashlytics_collection_enabled"
+            android:value="false" />
     </application>
 
 </manifest>

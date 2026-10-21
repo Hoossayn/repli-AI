@@ -36,7 +36,7 @@ Android SDK 37 and JDK 17:
 
 Nothing else is required. The debug package is `com.replyai.repli.keyboard.debug`; release is `com.replyai.repli.keyboard`.
 
-Crash reporting is optional: copy `firebase.local.properties.example` to the git-ignored `firebase.local.properties` and fill in the public Firebase mobile config for your own Firebase project. Release builds should upload their R8 mapping file to Firebase for readable stacks (the project initialises Firebase explicitly rather than from `google-services.json`); apply the Crashlytics Gradle plugin before a public release so reports carry a build ID.
+Crash reporting is optional: copy `firebase.local.properties.example` to the git-ignored `firebase.local.properties` and fill in the public Firebase mobile config for your own Firebase project. When those values are present the build generates a git-ignored `app/google-services.json` from them and applies the Google services and Crashlytics Gradle plugins, so reports carry a build ID and minified builds (`beta`, `release`) upload their R8 mapping file automatically. Register the `.debug` and `.beta` packages in Firebase for separate app entries, or leave their IDs blank to file under the release app.
 
 Never commit OpenAI keys or any credential. The app itself never contains one: AI calls use the token or key the user enters on the device.
 
