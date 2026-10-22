@@ -51,6 +51,10 @@ import dev.patrickgold.florisboard.ime.nlp.latin.repli.TapEvidence
 import dev.patrickgold.florisboard.ime.nlp.latin.repli.WordTouchHistory
 import dev.patrickgold.florisboard.ime.nlp.latin.repli.TypingContext
 import dev.patrickgold.florisboard.ime.nlp.latin.repli.WordPrediction
+import dev.patrickgold.florisboard.ime.nlp.latin.repli.GlidePoint
+import dev.patrickgold.florisboard.ime.nlp.latin.repli.GlideKey
+import dev.patrickgold.florisboard.ime.nlp.latin.repli.GlideCandidate
+import dev.patrickgold.florisboard.ime.nlp.latin.repli.GlideEditing
 import dev.patrickgold.florisboard.ime.nlp.latin.repli.WordPredictionEngine
 import dev.patrickgold.florisboard.repli.ime.ComposerSnapshot
 import dev.patrickgold.florisboard.repli.ime.RepliReplyOrchestrator
@@ -134,7 +138,8 @@ class ImeController(
             updateState {
                 val snapshot = request.key
                 if (suggestionWorkerIsCurrent(request) && state.editor === snapshot.editor &&
-                    isRepliAllowed(state) && state.typingContext() == snapshot.context &&
+                    isRepliAllowed(state) && _repliSuggestionState.value.source != RepliSuggestionState.Source.GLIDE &&
+                    state.typingContext() == snapshot.context &&
                     state.flags.isIncognitoMode == snapshot.privateSession
                 ) _repliSuggestionState.value = RepliSuggestionState(active = true, candidates = predictions)
             }
@@ -143,6 +148,191 @@ class ImeController(
 
     private fun suggestionWorkerIsCurrent(request: LatestPredictionWorker.Request<SuggestionSnapshot>) =
         suggestionWorker.isCurrent(request)
+    internal data class GlideSession(
+        val token: Long,
+        val editor: ImeEditor,
+        val model: K3Model,
+        val context: TypingContext,
+        val privateSession: Boolean,
+        val shift: InputShiftState,
+        val active: Boolean = false,
+    )
+    private data class GlideRequest(val token: Long, val points: List<GlidePoint>, val keys: List<GlideKey>)
+    private data class GlidePreview(val session: GlideSession, val input: GlideRequest)
+    private data class GlideWord(
+        val editor: ImeEditor, val context: TypingContext, val insertedText: String,
+        val word: String, val candidates: List<String>,
+    )
+    private var glideSequence = 0L
+    // These maps and editor mutations are accessed only under the IME state lock.
+    private val glideSessions = LinkedHashMap<Long, GlideSession>()
+    private var lastGlideWord: GlideWord? = null
+    private var lastGlidePreviewAt = 0L
+    private val completedGlides = Channel<GlideRequest>(capacity = 2)
+    private val glidePreviewWorker: LatestPredictionWorker<GlidePreview, List<GlideCandidate>> = LatestPredictionWorker(
+        scope,
+        compute = { request -> repliAssistant?.decodeGlide(request.input.points, request.input.keys, request.session.context.before).orEmpty() },
+        publish = { request, candidates ->
+            updateState {
+                val snapshot = request.key.session
+                if (glidePreviewWorkerIsCurrent(request) && glideSessions[snapshot.token] == snapshot &&
+                    glideMatches(snapshot, state, verifyLive = false)) {
+                    _repliSuggestionState.value = RepliSuggestionState(active = true, pending = true,
+                        candidates = candidates.map { WordPrediction(glideCase(it.word, snapshot.shift), 0, 0, false) },
+                        source = RepliSuggestionState.Source.GLIDE)
+                }
+            }
+        },
+    )
+
+    private fun glidePreviewWorkerIsCurrent(request: LatestPredictionWorker.Request<GlidePreview>) =
+        glidePreviewWorker.isCurrent(request)
+
+    init {
+        scope.launch {
+            // Final strokes are ordered, not conflated: a following glide must not erase a completed word.
+            for (request in completedGlides) {
+                var snapshot: GlideSession? = null
+                updateState {
+                    snapshot = glideSessions[request.token]?.takeIf { glideMatches(it, state) }
+                    if (snapshot == null) {
+                        glideSessions.remove(request.token)
+                        refreshRepliSuggestions(state)
+                    }
+                }
+                val selected = snapshot ?: continue
+                val candidates = repliAssistant?.decodeGlide(request.points, request.keys, selected.context.before).orEmpty()
+                updateState {
+                    if (glideSessions[request.token] == selected && glideMatches(selected, state)) {
+                        commitGlideResult(selected, candidates)
+                    } else {
+                        glideSessions.remove(request.token)
+                        refreshRepliSuggestions(state)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun isGlideAllowed(current: ImeState): Boolean = prefs.glide.enabled.get() &&
+        repliAssistant?.glideReady == true && current.editor !== ImeEditor.Disconnected &&
+        current.model.locales.firstOrNull()?.substringBefore('-')?.substringBefore('_') == "en" &&
+        current.touchLayerId.isTextLayer() && current.flags.imeUiMode == ImeUiMode.TEXT &&
+        TypingPredictionPolicy.allows(current.editor.info) && current.content.selection.isCollapsed() &&
+        current.content.selection.start >= 0 && repliReply?.isEditingInlineGuidance() != true
+
+    private fun ImeState.glideContext() = typingContext().copy(taps = emptyList())
+
+    private fun glideMatches(snapshot: GlideSession, current: ImeState, verifyLive: Boolean = true): Boolean =
+        isGlideAllowed(current) && current.editor === snapshot.editor && current.model === snapshot.model &&
+            current.flags.isIncognitoMode == snapshot.privateSession && current.glideContext() == snapshot.context &&
+            (!verifyLive || liveGlideContextMatches(current, snapshot.context))
+
+    private fun liveGlideContextMatches(current: ImeState, expected: TypingContext): Boolean {
+        val selection = current.editor.currentSelectionOrNull()
+        if (selection != null && (selection.start != expected.selectionStart || selection.end != expected.selectionEnd)) return false
+        val fresh = current.editor.getSurroundingText(WordPredictionEngine.BEFORE_LIMIT, WordPredictionEngine.AFTER_LIMIT)
+        return fresh.textBefore == expected.before && fresh.textAfter == expected.after && fresh.textSelected.isEmpty()
+    }
+
+    private fun glideCase(word: String, shift: InputShiftState): String = when (shift) {
+        InputShiftState.CAPS_LOCK -> word.uppercase(java.util.Locale.ROOT)
+        InputShiftState.SHIFTED_MANUAL, InputShiftState.SHIFTED_AUTOMATIC -> word.replaceFirstChar { it.uppercaseChar() }
+        else -> word
+    }
+
+    /** Reserve a bounded context snapshot; ordinary taps can still cancel it without changing the field. */
+    fun beginGlide(): Long? {
+        var token: Long? = null
+        updateStateBlocking {
+            if (isGlideAllowed(state) && glideSessions.size < 4) {
+                // Ordinary letter taps reserve only cached state; editor reads wait for activation.
+                val reserved = ++glideSequence
+                token = reserved
+                glideSessions[reserved] = GlideSession(reserved, state.editor, state.model, state.glideContext(),
+                    state.flags.isIncognitoMode, state.flags.inputShiftState)
+            }
+        }
+        return token
+    }
+
+    fun updateGlide(token: Long, points: List<GlidePoint>, keys: List<GlideKey>) {
+        updateStateBlocking {
+            val session = glideSessions[token] ?: return@updateStateBlocking
+            if (!glideMatches(session, state, verifyLive = false)) {
+                glideSessions.remove(token)
+                refreshRepliSuggestions(state)
+                return@updateStateBlocking
+            }
+            if (!session.active) {
+                // Initial editor info can contain a shorter window. Expand it once after checking
+                // that the cached text still agrees with the live editor at the same cursor.
+                val liveSelection = state.editor.currentSelectionOrNull()
+                val fresh = state.editor.getSurroundingText(WordPredictionEngine.BEFORE_LIMIT, WordPredictionEngine.AFTER_LIMIT)
+                if ((liveSelection != null && liveSelection != state.content.selection) ||
+                    fresh.textSelected.isNotEmpty() || !fresh.textBefore.endsWith(session.context.before) ||
+                    !fresh.textAfter.startsWith(session.context.after)) {
+                    glideSessions.remove(token)
+                    refreshRepliSuggestions(state)
+                    return@updateStateBlocking
+                }
+                val shift = state.flags.inputShiftState
+                val layer = state.touchLayerId
+                resetContent(state.content.selection, fresh)
+                // Expanding context must not consume the user's manual Shift state.
+                state = state.copy(touchLayerId = layer, flags = state.flags.withInputShiftState(shift))
+            }
+            val active = session.copy(active = true, context = state.glideContext())
+            glideSessions[token] = active
+            if (!session.active) _repliSuggestionState.value = RepliSuggestionState(active = true, pending = true, source = RepliSuggestionState.Source.GLIDE)
+            suggestionWorker.invalidate()
+            val now = android.os.SystemClock.uptimeMillis()
+            if (prefs.glide.showPreview.get() && now - lastGlidePreviewAt >= prefs.glide.previewRefreshDelay.get().coerceIn(50, 500)) {
+                lastGlidePreviewAt = now
+                glidePreviewWorker.submit(GlidePreview(active, GlideRequest(token, points.toList(), keys.toList())))
+            }
+        }
+    }
+
+    fun completeGlide(token: Long, points: List<GlidePoint>, keys: List<GlideKey>) {
+        updateStateBlocking {
+            val session = glideSessions[token] ?: return@updateStateBlocking
+            glidePreviewWorker.invalidate()
+            if (!glideMatches(session, state) || completedGlides.trySend(GlideRequest(token, points.toList(), keys.toList())).isFailure) {
+                glideSessions.remove(token)
+                refreshRepliSuggestions(state)
+            }
+        }
+    }
+
+    fun cancelGlide(token: Long) {
+        updateStateBlocking {
+            val cancelled = glideSessions.remove(token) ?: return@updateStateBlocking
+            if (cancelled.active) {
+                glidePreviewWorker.invalidate()
+                if (_repliSuggestionState.value.source == RepliSuggestionState.Source.GLIDE) clearRepliSuggestionState()
+                refreshRepliSuggestions(state)
+            }
+        }
+    }
+
+    private fun invalidateGlides() {
+        glideSessions.clear()
+        glidePreviewWorker.invalidate()
+        lastGlideWord = null
+        if (_repliSuggestionState.value.source == RepliSuggestionState.Source.GLIDE) clearRepliSuggestionState()
+    }
+
+    private fun validGlideWord(current: ImeState): GlideWord? = lastGlideWord?.takeIf {
+        it.editor === current.editor && isGlideAllowed(current) && current.glideContext() == it.context
+    }
+
+    private fun publishGlideWord(record: GlideWord) {
+        _repliSuggestionState.value = RepliSuggestionState(active = true,
+            candidates = record.candidates.map { WordPrediction(it, record.word.length, 0, false) },
+            source = RepliSuggestionState.Source.GLIDE)
+    }
+
     val repliReply = context?.let { ctx ->
         val app = ctx.applicationContext
         RepliReplyOrchestrator(
@@ -193,6 +383,7 @@ class ImeController(
     private fun replaceComposerText(snapshot: ComposerSnapshot, text: String): Boolean {
         var replaced = false
         updateStateBlocking {
+            invalidateGlides()
             val fresh = readComposerSnapshot()
             if (fresh == null || fresh.text != snapshot.text) return@updateStateBlocking
             lastAutoCorrection = null
@@ -212,6 +403,13 @@ class ImeController(
     }
 
     private fun refreshRepliSuggestions(current: ImeState) {
+        glideSessions.entries.removeAll { !glideMatches(it.value, current, verifyLive = false) }
+        if (glideSessions.values.any { it.active } && isGlideAllowed(current)) return
+        if (_repliSuggestionState.value.source == RepliSuggestionState.Source.GLIDE && _repliSuggestionState.value.pending) {
+            glidePreviewWorker.invalidate()
+            clearRepliSuggestionState()
+        }
+        validGlideWord(current)?.let { publishGlideWord(it); return }
         val enabled = repliAssistant != null && isRepliAllowed(current)
         val session = repliSuggestionSession
         val keepCandidates = enabled && session != null && session.first === current.editor &&
@@ -251,6 +449,15 @@ class ImeController(
         if (repliReply?.isEditingInlineGuidance() == true) return
         updateStateBlocking {
             val suggestions = _repliSuggestionState.value
+            if (suggestions.source == RepliSuggestionState.Source.GLIDE) {
+                val record = validGlideWord(state) ?: return@updateStateBlocking
+                if (suggestions.pending || prediction !in suggestions.candidates || !liveGlideContextMatches(state, record.context)) return@updateStateBlocking
+                replaceRepliWord(prediction)
+                val leading = record.insertedText.dropLast(record.word.length)
+                lastGlideWord = record.copy(context = state.glideContext(), insertedText = leading + prediction.word, word = prediction.word)
+                lastGlideWord?.let(::publishGlideWord)
+                return@updateStateBlocking
+            }
             if (!suggestions.active || suggestions.pending || prediction !in suggestions.candidates ||
                 !isRepliAllowed(state) || repliAssistant?.suggest(state.typingContext(), state.flags.isIncognitoMode)?.contains(prediction) != true
             ) return@updateStateBlocking
@@ -266,6 +473,7 @@ class ImeController(
     fun commitRepliReply(text: String) {
         if (text.isEmpty()) return
         updateStateBlocking {
+            invalidateGlides()
             val conn = state.editor.ic.get()
             if (conn == null) {
                 flogError { "RepliReply: commitRepliReply dropped, no input connection" }
@@ -432,6 +640,7 @@ class ImeController(
             info: FlorisEditorInfo,
         ) {
             lastAutoCorrection = null
+            invalidateGlides()
             wordTouches.clear()
             clearRepliSuggestionState()
             suggestionWorker.invalidate()
@@ -558,12 +767,13 @@ class ImeController(
             val liveSelection = state.editor.currentSelectionOrNull()
             if (liveSelection != null && liveSelection != newSelection) return
             expectedContentQueue.clear()
+            if (state.content.selection != newSelection) invalidateGlides()
             if (lastAutoCorrection?.cursor != newSelection.start || !newSelection.isCollapsed()) {
                 lastAutoCorrection = null
             }
             wordTouches.clear()
             if (state.content.selection != newSelection) clearRepliSuggestionState()
-            resetContent(newSelection, state.editor.getSurroundingText(50, 10))
+            resetContent(newSelection, state.editor.getSurroundingText(WordPredictionEngine.BEFORE_LIMIT, WordPredictionEngine.AFTER_LIMIT))
             expectedContentQueue.push(state.content)
             refreshRepliSuggestions(state)
         }
@@ -574,10 +784,16 @@ class ImeController(
                 repliReply.typeGuidance(committedText)
                 return
             }
+            val glideWord = validGlideWord(state)
+            if (glideWord != null && committedText.firstOrNull()?.isLetter() == true && liveGlideContextMatches(state, glideWord.context)) {
+                super.emitText(" ".asK3String())
+                expectedContentQueue.push(state.content)
+            }
+            invalidateGlides()
             val before = state.content.surroundingText.textBefore
             val after = state.content.surroundingText.textAfter
             val word = before.takeLastWhile { it.isLetter() || it == '\'' || it == '’' }
-            val canProcessWord = word.isNotEmpty() && committedText.firstOrNull()?.let { !it.isLetter() && it != '\'' && it != '’' } == true &&
+            val canProcessWord = glideWord == null && word.isNotEmpty() && committedText.firstOrNull()?.let { !it.isLetter() && it != '\'' && it != '’' } == true &&
                 after.firstOrNull()?.let { it.isLetter() || it == '\'' || it == '’' } != true &&
                 !before.takeLastWhile { !it.isWhitespace() }.let { it.contains('@') || it.contains("://") || it.startsWith("www.", true) } &&
                 isRepliAllowed(state)
@@ -603,6 +819,43 @@ class ImeController(
             reevaluateInputShiftState()
         }
 
+        internal fun commitGlideResult(snapshot: GlideSession, candidates: List<GlideCandidate>) {
+            glideSessions.remove(snapshot.token)
+            if (candidates.isEmpty()) {
+                clearRepliSuggestionState()
+                refreshRepliSuggestions(state)
+                return
+            }
+            val words = candidates.map { glideCase(it.word, snapshot.shift) }.distinct()
+            val beforeContext = state.glideContext()
+            val insertion = GlideEditing.insertion(beforeContext.before, beforeContext.after, words.first()) ?: run {
+                clearRepliSuggestionState(); refreshRepliSuggestions(state); return
+            }
+            suggestionWorker.invalidate()
+            glidePreviewWorker.invalidate()
+            lastAutoCorrection = null
+            wordTouches.clear()
+            val start = state.content.selection.start
+            val selection = K3TextRange(start + insertion.length, start + insertion.length)
+            state.editor.replaceText(start until start, insertion, selection, null)
+            resetContent(selection, state.editor.getSurroundingText(WordPredictionEngine.BEFORE_LIMIT, WordPredictionEngine.AFTER_LIMIT))
+            expectedContentQueue.push(state.content)
+            val afterContext = state.glideContext()
+            // Advance only snapshots matching our exact own pre-commit context. External edits never qualify.
+            for ((token, session) in glideSessions.toMap()) {
+                if (session.editor === state.editor && session.context == beforeContext) {
+                    // Only automatic capitalization follows the newly committed context.
+                    // Preserve an explicit Shift/Caps decision captured for the following stroke.
+                    val shift = if (session.shift == InputShiftState.SHIFTED_AUTOMATIC) {
+                        state.flags.inputShiftState
+                    } else session.shift
+                    glideSessions[token] = session.copy(context = afterContext, shift = shift)
+                }
+            }
+            lastGlideWord = GlideWord(state.editor, afterContext, insertion, words.first(), words)
+            publishGlideWord(lastGlideWord!!)
+        }
+
         fun replaceRepliWord(prediction: WordPrediction) {
             wordTouches.clear()
             val start = state.content.selection.start - prediction.removeBefore
@@ -615,6 +868,7 @@ class ImeController(
         }
 
         override fun emitDescriptor(descriptor: K3Descriptor) {
+            if (descriptor != ImeActions.Backspace) invalidateGlides()
             if (repliReply?.isEditingInlineGuidance() == true && descriptor in setOf(
                     ImeActions.ArrowDown, ImeActions.ArrowLeft, ImeActions.ArrowRight,
                     ImeActions.ArrowUp, ImeActions.Delete,
@@ -735,6 +989,19 @@ class ImeController(
         override fun emitBackspace() {
             if (repliReply?.isEditingInlineGuidance() == true) {
                 repliReply.deleteGuidance()
+                return
+            }
+            val glideWord = validGlideWord(state)
+            invalidateGlides()
+            if (glideWord != null && prefs.glide.immediateBackspaceDeletesWord.get() && liveGlideContextMatches(state, glideWord.context)) {
+                lastAutoCorrection = null
+                val end = state.content.selection.start
+                val selection = K3TextRange(end - glideWord.insertedText.length, end - glideWord.insertedText.length)
+                state.editor.replaceText(selection.start until end, "", selection, null)
+                wordTouches.clear()
+                resetContent(selection, state.editor.getSurroundingText(WordPredictionEngine.BEFORE_LIMIT, WordPredictionEngine.AFTER_LIMIT))
+                expectedContentQueue.push(state.content)
+                refreshRepliSuggestions(state)
                 return
             }
             val undo = lastAutoCorrection
@@ -953,6 +1220,7 @@ class ImeController(
 
         fun handleFinishInputView() {
             lastAutoCorrection = null
+            invalidateGlides()
             wordTouches.clear()
             clearRepliSuggestionState()
             suggestionWorker.invalidate()

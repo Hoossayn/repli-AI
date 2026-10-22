@@ -33,6 +33,9 @@ interface KeyboardLexicon {
     fun contains(word: String): Boolean
     fun frequency(word: String): Int = 0
 
+    /** Static licensed vocabulary only; constructed once away from the IME thread. */
+    fun glideWords(): List<LexiconWord> = emptyList()
+
     /** Two-edit, keyboard-aware candidates for words the one-edit index cannot fix. */
     fun fuzzyCorrections(word: String, limit: Int): List<FuzzyCorrection> = emptyList()
     fun fuzzyCorrections(word: String, limit: Int, taps: List<TapEvidence?>): List<FuzzyCorrection> = fuzzyCorrections(word, limit)
@@ -49,6 +52,12 @@ class BundledKeyboardLexicon private constructor(
     private val words: Map<String, Entry>,
     private val deleteIndex: Map<String, List<Entry>>,
 ) : KeyboardLexicon {
+    private val glideVocabulary: List<LexiconWord> = entries.asSequence()
+        .filter { !it.completionOnly && it.normalized.length in 2..32 && it.normalized.all { c -> c in 'a'..'z' } }
+        .map { LexiconWord(it.normalized, it.frequency) }.toList()
+
+    override fun glideWords(): List<LexiconWord> = glideVocabulary
+
     override fun completions(prefix: String, limit: Int): List<LexiconWord> {
         val query = prefix.normalized()
         if (query.isEmpty() || limit <= 0) return emptyList()

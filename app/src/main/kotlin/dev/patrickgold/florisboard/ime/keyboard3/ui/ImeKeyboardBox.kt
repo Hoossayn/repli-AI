@@ -247,6 +247,7 @@ fun ImeKeyboardBox(
                     )
                 }
             }
+            GlideTrail(pointerTracker)
         }
     }
 }

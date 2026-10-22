@@ -48,6 +48,13 @@ class RepliInputAssistant(context: Context, private val onReady: () -> Unit) {
     val predictionMetrics: PredictionMetrics.Snapshot get() = predictionCache.metrics.snapshot()
     fun resetPredictionMetrics() = predictionCache.metrics.reset()
 
+    @Volatile private var glideDecoder: GlideDecoder? = null
+    val glideReady: Boolean get() = glideDecoder != null
+
+    /** Uses only bundled static words, even in normal sessions; gesture paths are never retained. */
+    fun decodeGlide(points: List<GlidePoint>, keys: List<GlideKey>, before: String): List<GlideCandidate> =
+        glideDecoder?.decode(points, keys, contextWords = WORD.findAll(before.lowercase()).map { it.value }.toList().takeLast(2)).orEmpty()
+
     init {
         engine.setAdaptiveEnabled(preferences.enabled)
         scope.launch {
@@ -61,7 +68,11 @@ class RepliInputAssistant(context: Context, private val onReady: () -> Unit) {
                         supplements.forEach { it.close() }
                     }
                 }
-            }.onSuccess { engine.installLexicon(it); predictionCache.invalidate() }
+            }.onSuccess {
+                engine.installLexicon(it)
+                glideDecoder = GlideDecoder(it.glideWords())
+                predictionCache.invalidate()
+            }
             runCatching {
                 appContext.assets.open("ime/dict/repli-en_chat.ngrams").use(ChatNgramModel::load)
             }.onSuccess { engine.installChatModel(it); predictionCache.invalidate() }

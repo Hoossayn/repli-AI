@@ -21,4 +21,7 @@ data class RepliSuggestionState(
     val active: Boolean = false,
     val pending: Boolean = false,
     val candidates: List<WordPrediction> = emptyList(),
-)
+    val source: Source = Source.TAP,
+) {
+    enum class Source { TAP, GLIDE }
+}

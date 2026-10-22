@@ -42,6 +42,8 @@ import dev.patrickgold.florisboard.ime.keyboard3.LocalImeController
 import dev.patrickgold.florisboard.ime.keyboard3.touch.InputShiftState
 import dev.patrickgold.florisboard.ime.keyboard3.touch.TouchKey
 import dev.patrickgold.florisboard.ime.keyboard3.touch.TouchKeyboard
+import dev.patrickgold.florisboard.ime.nlp.latin.repli.GlidePoint
+import dev.patrickgold.florisboard.ime.nlp.latin.repli.GlideKey
 import dev.patrickgold.florisboard.ime.nlp.latin.repli.TapEvidence
 import dev.patrickgold.jetpref.datastore.model.collectAsState
 import kotlinx.coroutines.CoroutineScope
@@ -105,6 +107,12 @@ data class PeekLine(
     val end: Offset,
 )
 
+data class GlideTrailSnapshot(
+    val points: List<GlidePoint> = emptyList(),
+    val active: Boolean = false,
+    val version: Long = 0,
+)
+
 private data class LastUpKey(
     val touchKey: TouchKey,
     val uptimeMillis: Long,
@@ -130,6 +138,69 @@ class PointerTracker(
         field = MutableStateFlow(null)
 
     private var lastUpKeyState: LastUpKey? = null
+    private data class PendingGlide(
+        val id: PointerId,
+        val token: Long,
+        val size: IntSize,
+        val layer: K3LayerId,
+        val keys: List<GlideKey>,
+        val stroke: GlideStroke,
+        val activationDeadline: Long,
+    )
+    private var glide: PendingGlide? = null
+    private val downPointers = mutableSetOf<PointerId>()
+    private val blockedGlidePointers = mutableSetOf<PointerId>()
+    val glideTrail: StateFlow<GlideTrailSnapshot>
+        field = MutableStateFlow(GlideTrailSnapshot())
+
+    fun clearGlideTrail(version: Long) {
+        glideTrail.update { if (it.version == version) it.copy(points = emptyList()) else it }
+    }
+
+    private fun publishTrail(points: List<GlidePoint>, active: Boolean) {
+        glideTrail.update { GlideTrailSnapshot(points, active, it.version + 1) }
+    }
+
+    private fun cancelGlide() {
+        glide?.let {
+            imeController.cancelGlide(it.token)
+            if (it.stroke.active) publishTrail(it.stroke.points, false)
+        }
+        glide = null
+    }
+
+    private fun sampleGlide(change: PointerInputChange, size: IntSize): Boolean {
+        val current = glide?.takeIf { it.id == change.id } ?: return false
+        val output = trackedOutputPointer.value
+        if (current.size != size || output == null || output.longPress.shouldShowExtendedPopup() ||
+            (!current.stroke.active && change.uptimeMillis > current.activationDeadline)) {
+            if (current.stroke.active) blockedGlidePointers.add(current.id)
+            cancelGlide()
+            return false
+        }
+        fun add(position: Offset, time: Long) {
+            val letter = (touchKeyboard.findKey(current.layer, position.normalized(size))?.attrs?.output as? K3String)
+                ?.toText()?.singleOrNull()?.lowercaseChar()?.takeIf { it in 'a'..'z' }
+            current.stroke.add(GlidePoint(position.x, position.y), time, letter)
+        }
+        change.historical.forEach { add(it.position, it.uptimeMillis) }
+        add(change.position, change.uptimeMillis)
+        if (current.stroke.rejected) {
+            // An active stroke must never fall back to inserting its starting key.
+            blockedGlidePointers.add(current.id)
+            cancelGlide()
+            return false
+        }
+        if (current.stroke.active) {
+            output.longPress.extendedJob?.cancel()
+            output.repeatJob?.cancel()
+            trackedOutputPointer.value = output.copy(longPress = LongPress.None, repeatJob = null)
+            publishTrail(current.stroke.points, true)
+            imeController.updateGlide(current.token, current.stroke.points, current.keys)
+            return true
+        }
+        return false
+    }
 
     suspend fun mutateLocked(action: suspend PointerTracker.() -> Unit) {
         mutationGuard.withLock { action() }
@@ -137,6 +208,21 @@ class PointerTracker(
 
     context(scope: CoroutineScope)
     suspend fun handleDown(down: PointerInputChange, size: IntSize) {
+        val hadOtherPointer = downPointers.any { it != down.id }
+        downPointers.add(down.id)
+        glide?.let { previous ->
+            val wasActive = previous.stroke.active
+            if (wasActive) blockedGlidePointers.add(previous.id)
+            cancelGlide()
+            if (wasActive) {
+                blockedGlidePointers.add(down.id)
+                cancelOutput()
+            }
+        }
+        if (blockedGlidePointers.isNotEmpty()) {
+            blockedGlidePointers.add(down.id)
+            return
+        }
         val lastUpKey = lastUpKeyState
 
         trackedPeekPointer.value?.let { trackedPointer ->
@@ -275,11 +361,29 @@ class PointerTracker(
                     )
                 }
             }
+            if (!hadOtherPointer && trackedMultiTapSeq.value == null && size.width > 0 && size.height > 0) {
+                val letter = (downKey.attrs.output as? K3String)?.toText()?.singleOrNull()
+                    ?.lowercaseChar()?.takeIf { it in 'a'..'z' }
+                val token = if (letter != null) imeController.beginGlide() else null
+                if (token != null && letter != null) {
+                    val keys = touchKeyboard.predictionKeys(downLayerId).map {
+                        GlideKey(it.letter, it.centerX * size.width, it.centerY * size.height,
+                            it.width * size.width, it.height * size.height)
+                    }
+                    glide = PendingGlide(down.id, token, size, downLayerId, keys,
+                        GlideStroke(GlidePoint(down.position.x, down.position.y), down.uptimeMillis,
+                            letter, downKey.bounds.width * size.width, size.width, size.height),
+                        down.uptimeMillis + longPressTimeout.inWholeMilliseconds.coerceIn(1, 5000))
+                }
+            }
             interactionController.performFeedback(InteractionKind.KeyPress)
         }
     }
 
     suspend fun handleMove(move: PointerInputChange, size: IntSize) {
+        if (move.id in blockedGlidePointers) return
+        if (sampleGlide(move, size)) return
+        if (move.id in blockedGlidePointers) { cancelOutput(); return }
         trackedPeekPointer.value?.takeIf { it.id == move.id }?.let { trackedPointer ->
             val distanceSq = (move.position - trackedPointer.down.position).getDistanceSquared()
             if (trackedPointer.peekLine != null || distanceSq >= peekDistanceSqMin) {
@@ -314,6 +418,21 @@ class PointerTracker(
 
     context(scope: CoroutineScope)
     suspend fun handleUp(up: PointerInputChange, size: IntSize) {
+        downPointers.remove(up.id)
+        if (blockedGlidePointers.remove(up.id)) { cancelOutput(); return }
+        sampleGlide(up, size)
+        if (blockedGlidePointers.remove(up.id)) { cancelOutput(); return }
+        glide?.takeIf { it.id == up.id }?.let { current ->
+            glide = null
+            if (current.stroke.active && !current.stroke.rejected) {
+                cancelOutput()
+                publishTrail(current.stroke.points, false)
+                imeController.completeGlide(current.token, current.stroke.points, current.keys)
+                lastUpKeyState = null
+                return
+            }
+            imeController.cancelGlide(current.token)
+        }
         trackedPeekPointer.value?.takeIf { it.id == up.id }?.let { trackedPointer ->
             imeController.updateState {
                 trackedPointer.peekKey?.attrs?.output?.let { emit(it) }
@@ -370,6 +489,10 @@ class PointerTracker(
     }
 
     suspend fun cancelNonPresent(changes: List<PointerInputChange>) {
+        val present = changes.mapTo(mutableSetOf()) { it.id }
+        downPointers.retainAll(present)
+        blockedGlidePointers.retainAll(present)
+        glide?.takeIf { it.id !in present }?.let { cancelGlide() }
         trackedPeekPointer.value?.id?.let { id ->
             if (changes.fastAll { it.id != id }) {
                 cancelPeek()
@@ -383,6 +506,10 @@ class PointerTracker(
     }
 
     suspend fun cancelAll() {
+        cancelGlide()
+        downPointers.clear()
+        blockedGlidePointers.clear()
+        publishTrail(emptyList(), false)
         cancelPeek()
         cancelOutput()
     }
